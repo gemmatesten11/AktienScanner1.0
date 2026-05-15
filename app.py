@@ -202,8 +202,16 @@ if st.button("🚀 Scan Starten"):
                         macd_ok = last['MACD'] > last['MACD_Signal']
                         vol_ok = last['Volume'] > (avg_vol * vol_mult)
                         
-                        if rsi_ok and macd_ok and vol_ok:
+                      if rsi_ok and macd_ok and vol_ok:
                             found_counter += 1
                             st.success(f"🎯 Treffer #{found_counter}: **{ticker}**")
                             
-                            prompt = (f"Aktie {ticker}: RSI ist {last['RSI']:.
+                            # KORREKTUR: Mehrzeiliger f-String mit """ verhindert den SyntaxError
+                            prompt = f"""
+                            Aktie {ticker}: RSI ist {last['RSI']:.1f}, 
+                            Volumen liegt bei {last['Volume']/avg_vol:.1f}x des Durchschnitts. 
+                            Gib eine extrem kurze, professionelle Trading-Einschätzung (max. 2 Sätze).
+                            """
+                            
+                            response = model.generate_content(prompt)
+                            st.info(f"**Gemini-Analyse:** {response.text}")
