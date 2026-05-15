@@ -1,6 +1,7 @@
 streamlit
 yfinance
 pandas
-lxml
 plotly
-ta
+scikit-learn
+lxml
+html5lib
