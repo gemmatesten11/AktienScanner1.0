@@ -1,6 +1,5 @@
 import streamlit as st
 import yfinance as yf
-import pandas_ta as ta
 import pandas as pd
 import os
 import google.generativeai as genai
@@ -9,12 +8,26 @@ import google.generativeai as genai
 GOOGLE_API_KEY = os.environ.get("GEMINI_API_KEY")
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
-    # Wir nutzen das aktuelle, schnelle Standardmodell Gemini 1.5 Flash
     model = genai.GenerativeModel('gemini-1.5-flash')
 else:
-    st.error("Bitte hinterlege den GEMINI_API_KEY in den Hugging Face Secrets!")
+    st.error("Bitte hinterlege den GEMINI_API_KEY in den Hugging Face / Streamlit Secrets!")
 
-st.title("🤖 KI-Markt- & Branchen-Scanner (Powered by Gemini)")
+# Mathematische Funktionen als Ersatz für pandas_ta
+def calculate_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+def calculate_macd(series, slow=26, fast=12, signal=9):
+    exp1 = series.ewm(span=fast, adjust=False).mean()
+    exp2 = series.ewm(span=slow, adjust=False).mean()
+    macd_line = exp1 - exp2
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    return macd_line, signal_line
+
+st.title("🤖 KI-Markt- & Branchen-Scanner")
 st.write("Wähle Index und Branche. Der Agent filtert den Markt nach deiner RSI-MACD-Volumen-Strategie.")
 
 # 1. Auswahl des Marktes
@@ -123,18 +136,20 @@ if st.button("🚀 Scan Starten"):
                 progress_bar.progress((index + 1) / len(filtered_tickers))
                 
                 try:
-                    df = yf.download(ticker, period="1mo", interval="1d", progress=False)
-                    if df.empty or len(df) < 20: continue
+                    # Wir laden 3 Monate, damit der gleitende Durchschnitt für den RSI stabil berechnet werden kann
+                    df = yf.download(ticker, period="3mo", interval="1d", progress=False)
+                    if df.empty or len(df) < 30: continue
                     
-                    df['RSI'] = ta.rsi(df['Close'], length=14)
-                    macd = ta.macd(df['Close'])
-                    df = df.join(macd)
+                    # Eigene Berechnung der Indikatoren aufrufen
+                    df['RSI'] = calculate_rsi(df['Close'], period=14)
+                    df['MACD'], df['MACD_Signal'] = calculate_macd(df['Close'])
                     
                     last = df.iloc[-1]
                     avg_vol = df['Volume'].tail(15).mean()
                     
+                    # Deine Strategie-Kriterien
                     rsi_ok = 55 <= last['RSI'] <= 65
-                    macd_ok = last['MACD_12_26_9'] > last['MACDs_12_26_9']
+                    macd_ok = last['MACD'] > last['MACD_Signal']
                     vol_ok = last['Volume'] > (avg_vol * 1.3)
                     
                     if rsi_ok and macd_ok and vol_ok:
@@ -146,9 +161,7 @@ if st.button("🚀 Scan Starten"):
                                   f"RSI ist {last['RSI']:.1f}, Volumen liegt bei {last['Volume']/avg_vol:.1f}x des Durchschnitts. "
                                   f"Gib eine extrem kurze, professionelle Trading-Einschätzung (max. 2 Sätze).")
                         
-                        # Gemini Textgenerierung aufrufen
                         response = model.generate_content(prompt)
-                        
                         st.info(f"**Gemini-Analyse:** {response.text}")
                         st.divider()
                         
