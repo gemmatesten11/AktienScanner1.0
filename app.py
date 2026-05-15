@@ -109,35 +109,3 @@ def fetch_market_data(markt):
                         listing = str(row[c_listing[0]]).lower()
                         if 'paris' in listing: suffix = ".PA"
                         elif 'amsterdam' in listing: suffix = ".AS"
-                        elif 'milan' in listing or 'milano' in listing: suffix = ".MI"
-                        elif 'madrid' in listing: suffix = ".MC"
-                        elif 'brussels' in listing: suffix = ".BR"
-                    ticker += suffix
-            extracted.append({"ticker": ticker, "name": name})
-        return extracted
-
-    try:
-        if "S&P 500" in markt:
-            req = urllib.request.Request("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", headers=headers)
-            with urllib.request.urlopen(req) as r: df = pd.read_html(StringIO(r.read().decode('utf-8')))[0]
-            return extract_from_df(df, "S&P")
-        elif "S&P 400" in markt:
-            req = urllib.request.Request("https://en.wikipedia.org/wiki/List_of_S%26P_400_companies", headers=headers)
-            with urllib.request.urlopen(req) as r: df = pd.read_html(StringIO(r.read().decode('utf-8')))[0]
-            return extract_from_df(df, "S&P")
-        elif "S&P 600" in markt:
-            req = urllib.request.Request("https://en.wikipedia.org/wiki/List_of_S%26P_600_companies", headers=headers)
-            with urllib.request.urlopen(req) as r: df = pd.read_html(StringIO(r.read().decode('utf-8')))[1]
-            return extract_from_df(df, "S&P")
-        elif "DAX 40" in markt:
-            req = urllib.request.Request("https://de.wikipedia.org/wiki/DAX", headers=headers)
-            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
-            for df in tables:
-                res = extract_from_df(df, "DAX")
-                if len(res) >= 30: return res
-        elif "MDAX" in markt:
-            req = urllib.request.Request("https://de.wikipedia.org/wiki/MDAX", headers=headers)
-            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
-            for df in tables:
-                res = extract_from_df(df, "MDAX")
-                if len(res)
