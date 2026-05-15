@@ -4,19 +4,26 @@ import pandas as pd
 import urllib.request
 from io import StringIO
 import plotly.graph_objects as gr
-from plotly.subplots import make_subplots  # Neu für das geteilte Chart-Layout
+from plotly.subplots import make_subplots
 
 # Streamlit Page Config
 st.set_page_config(layout="wide", page_title="Schneller RSI-Scanner", page_icon="⚡")
 
 # ==============================================================================
-# 1. HILFSFUNKTIONEN & INITIALISIERUNG
+# 1. KORRIGIERTE RSI FUNKTION (WILDER'S SMOOTHING)
 # ==============================================================================
 def calculate_rsi(series, period=14):
     delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
+    
+    # Gewinne und Verluste trennen
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    
+    # Wilder's Smoothing via Exponential Moving Average (EMA) mit alpha = 1/period
+    avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
+    
+    rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
 def get_wikipedia_table(url, match_index=0):
@@ -31,7 +38,7 @@ if "has_scanned" not in st.session_state:
     st.session_state.has_scanned = False
 
 # ==============================================================================
-# 2. SEITENLEISTE (RSI SCHIEBEREGLER & GOLDEN CROSS)
+# 2. SEITENLEISTE
 # ==============================================================================
 st.sidebar.header("⚡ RSI-Filter")
 rsi_min = st.sidebar.slider("Minimaler RSI-Wert", 0, 100, 20, step=1)
@@ -42,15 +49,13 @@ st.sidebar.header("📈 Chart-Signale")
 golden_cross_active = st.sidebar.toggle("Nur mit Golden Cross (letzte 5 Tage)", value=False)
 
 # ==============================================================================
-# 3. POP-UP MIT KOMBI-CHART (KURS + SMAs & RSI DARUNTER)
+# 3. POP-UP
 # ==============================================================================
 @st.dialog("📊 Aktien-Details & Signal", width="large")
 def show_details_popup(ticker):
     with st.spinner("Lade Daten und Berechne Indikatoren..."):
         try:
             stock = yf.Ticker(ticker)
-            
-            # Sicheres Auslesen des echten Unternehmensnamens
             try:
                 company_name = stock.info.get('longName', ticker)
             except Exception:
@@ -58,23 +63,20 @@ def show_details_popup(ticker):
             
             st.write(f"## {company_name} (`{ticker}`)")
             
-            # Daten laden (1 Jahr für stabilen SMA200)
+            # Immer 1 Jahr laden, um stabilen SMA200 und exakten RSI zu garantieren
             df = stock.history(period="1y", interval="1d")
             df['RSI'] = calculate_rsi(df['Close'], period=14)
             
-            # SMAs berechnen
             df['SMA50'] = df['Close'].rolling(window=50).mean()
             df['SMA200'] = df['Close'].rolling(window=200).mean()
             
-            # Golden Cross Auswertung
             df['Above'] = df['SMA50'] > df['SMA200']
             df['Crossover'] = df['Above'] & (~df['Above'].shift(1).fillna(True))
             recent_golden_cross = df['Crossover'].tail(5).any()
             
             rsi_aktuell = df['RSI'].iloc[-1]
-            df_last30 = df.tail(30) # Visualisierung der letzten 30 Handelstage
+            df_last30 = df.tail(30)
             
-            # --- AMPEL LOGIK ---
             if rsi_aktuell < 30 or recent_golden_cross:
                 ampel_signal = "🟢 KAUFEN (Buy)"
                 grund = "Der RSI ist überverkauft (< 30) oder es gab ein frisches Golden Cross (letzte 5 Tage)."
@@ -85,7 +87,6 @@ def show_details_popup(ticker):
                 ampel_signal = "🟡 HALTEN (Hold)"
                 grund = "RSI ist im neutralen Bereich und kein akutes Ausbruchsignal vorhanden."
             
-            # Info-Metriken
             col1, col2 = st.columns(2)
             with col1:
                 st.metric("Aktueller RSI-Wert", f"{rsi_aktuell:.2f}")
@@ -96,57 +97,26 @@ def show_details_popup(ticker):
             st.write("---")
             st.write("### Chart-Analyse (Letzte 30 Handelstage)")
             
-            # Subplots erstellen: 2 Reihen, 1 Spalte (gemeinsame X-Achse für das Datum)
-            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
-                                vertical_spacing=0.08, 
-                                row_heights=[0.6, 0.4])
-            
-            # REIHE 1: Kurs + SMA 50 + SMA 200
+            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08, row_heights=[0.6, 0.4])
             fig.add_trace(gr.Scatter(x=df_last30.index, y=df_last30['Close'], mode='lines', name='Kurs', line=dict(color='#1f77b4', width=2)), row=1, col=1)
             fig.add_trace(gr.Scatter(x=df_last30.index, y=df_last30['SMA50'], mode='lines', name='SMA 50', line=dict(color='orange', width=1.5)), row=1, col=1)
             fig.add_trace(gr.Scatter(x=df_last30.index, y=df_last30['SMA200'], mode='lines', name='SMA 200', line=dict(color='red', width=1.5)), row=1, col=1)
             
-            # REIHE 2: RSI Verlauf
             fig.add_trace(gr.Scatter(x=df_last30.index, y=df_last30['RSI'], mode='lines+markers', name='RSI 14', line=dict(color='purple', width=2)), row=2, col=1)
-            
-            # RSI Grenzliniengestaltung in Reihe 2
             fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
             fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
             
-            # Layout-Feinschliff (Größe und RSI-Skala begrenzen)
-            fig.update_layout(
-                height=480, 
-                margin=dict(l=10, r=10, t=10, b=10), 
-                showlegend=True,
-                yaxis2=dict(range=[0, 100]) # Zwingt die RSI-Achse auf die Range 0-100
-            )
-            
+            fig.update_layout(height=480, margin=dict(l=10, r=10, t=10, b=10), showlegend=True, yaxis2=dict(range=[0, 100]))
             st.plotly_chart(fig, use_container_width=True)
             
         except Exception as e:
             st.error(f"Fehler beim Laden der Details: {e}")
 
 # ==============================================================================
-# 4. HAUPTANSICHT: AUSWAHL
+# 4. HAUPTANSICHT
 # ==============================================================================
 st.title("⚡ Ultra-Schneller Globaler RSI-Scanner")
-st.write("Durchsuche die wichtigsten Indizes der Welt in Sekundenschnelle nach RSI-Grenzen und Chartsignalen.")
-
-markt = st.selectbox(
-    "1. Welchen Markt / Index möchtest du scannen?",
-    (
-        "USA (S&P 500 Large Caps)",
-        "USA (S&P 400 Mid Caps)",
-        "USA (S&P 600 Small Caps)",
-        "Deutschland (DAX 40 Large Caps)",
-        "Deutschland (MDAX Mid Caps)",
-        "Deutschland (SDAX Small Caps)",
-        "Eurozone (EURO STOXX 50)",
-        "Großbritannien (FTSE 100)",
-        "Frankreich (CAC 40)",
-        "Japan (Nikkei 225)"
-    )
-)
+markt = st.selectbox("1. Welchen Markt / Index möchtest du scannen?", ("USA (S&P 500 Large Caps)", "USA (S&P 400 Mid Caps)", "USA (S&P 600 Small Caps)", "Deutschland (DAX 40 Large Caps)", "Deutschland (MDAX Mid Caps)", "Deutschland (SDAX Small Caps)", "Eurozone (EURO STOXX 50)", "Großbritannien (FTSE 100)", "Frankreich (CAC 40)", "Japan (Nikkei 225)"))
 
 # ==============================================================================
 # 5. HIGH-SPEED SCAN LOGIK
@@ -160,10 +130,10 @@ if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
             if "S&P 500" in markt:
                 table = get_wikipedia_table("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", 0)
                 tickers = [t.replace('.', '-') for t in table['Symbol'].tolist()]
-            elif "S%26P 400" in markt or "S&P 400" in markt:
+            elif "S&P 400" in markt:
                 table = get_wikipedia_table("https://en.wikipedia.org/wiki/List_of_S%26P_400_companies", 0)
                 tickers = [t.replace('.', '-') for t in table['Ticker symbol'].tolist()]
-            elif "S%26P 600" in markt or "S&P 600" in markt:
+            elif "S&P 600" in markt:
                 table = get_wikipedia_table("https://en.wikipedia.org/wiki/List_of_S%26P_600_companies", 1)
                 tickers = [t.replace('.', '-') for t in table['Ticker symbol'].tolist()]
             elif "DAX 40" in markt:
@@ -197,7 +167,8 @@ if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
 
         with st.spinner(f"Scanne {len(tickers)} Aktien parallel..."):
             try:
-                download_period = "1y" if golden_cross_active else "1mo"
+                # WICHTIG: Mindestens 3 Monate ("3mo") für korrekte RSI-Einschwingzeit laden!
+                download_period = "1y" if golden_cross_active else "3mo"
                 data = yf.download(tickers, period=download_period, interval="1d", group_by='ticker', progress=False)
                 
                 for ticker in tickers:
@@ -205,14 +176,12 @@ if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
                     if df.empty or len(df) < 15: 
                         continue
                     
-                    # RSI Check
                     df['RSI'] = calculate_rsi(df['Close'], period=14)
                     rsi_aktuell = df['RSI'].iloc[-1]
                     
                     if not (rsi_min <= rsi_aktuell <= rsi_max):
                         continue
                     
-                    # Golden Cross Check
                     if golden_cross_active:
                         if len(df) < 200:
                             continue
@@ -238,7 +207,6 @@ if st.session_state.has_scanned:
     st.write("---")
     if st.session_state.scan_results:
         st.write(f"### 🎯 Treffer im gewählten Bereich ({len(st.session_state.scan_results)})")
-        
         cols = st.columns(3)
         for idx, item in enumerate(st.session_state.scan_results):
             col_target = cols[idx % 3]
