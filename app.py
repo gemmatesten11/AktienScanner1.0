@@ -94,7 +94,6 @@ def show_details_popup(ticker):
             recent_golden_cross = df_base['Crossover'].tail(14).any()
             rsi_aktuell = df_base['RSI'].iloc[-1]
             
-            # KORRIGIERTE STRINGS IN DER AMPEL-LOGIK
             if rsi_aktuell > 70:
                 ampel_signal = "🔴 VERKAUFEN (Sell)"
                 grund = "Der RSI (Tagesbasis) ist überkauft (> 70). Das Korrekturrisiko ist kurzfristig erhöht."
@@ -108,7 +107,7 @@ def show_details_popup(ticker):
                     grund = "Es gab ein frisches Golden Cross (SMA50 schneidet SMA200) in den letzten 14 Tagen."
             else:
                 ampel_signal = "🟡 HALTEN (Hold)"
-                grund = "Die Aktie befindet sich im neutralen Tagesbereich. Kein akutes Ausbruchsignal vorhanden."
+                grund = "Die Aktie befindet sich im Antwortbereich auf Tagesbasis im neutralen Sektor."
             
             st.markdown(f"### Signal-Ampel (Tagesbasis): {ampel_signal}")
             st.caption(f"**Grund:** {grund}")
@@ -143,4 +142,17 @@ def show_details_popup(ticker):
                 render_chart(df_10m, "10 Min")
 
             with tab2:
-                st.write("### 30-Minuten-Chart (Letzte 14
+                st.write("### 30-Minuten-Chart (Letzte 14 Tage)")
+                df_30m = stock.history(period="14d", interval="30m")
+                render_chart(df_30m, "30 Min")
+
+            with tab3:
+                st.write("### 4-Stunden-Chart (Letzte 2 Monate)")
+                df_1h = stock.history(period="60d", interval="1h")
+                if not df_1h.empty:
+                    df_4h = df_1h.resample('4h').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}).dropna()
+                else:
+                    df_4h = pd.DataFrame()
+                render_chart(df_4h, "4 Std")
+
+            with tab4:
