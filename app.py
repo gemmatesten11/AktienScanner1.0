@@ -24,30 +24,24 @@ def load_cached_history(ticker, period, interval):
 
 @st.cache_data(ttl=86400)  # Stammdaten ändern sich selten, 24 Std. Cache
 def load_cached_meta(ticker):
-    # Holt ISIN und den ausgeschriebenen Namen stark abgesichert und im Cache
     try:
         stock = yf.Ticker(ticker)
-        
-        # Versuche den echten Firmennamen zu holen, Fallback auf Ticker
         try:
             company_name = stock.info.get('longName', ticker)
         except Exception:
             company_name = ticker
-            
-        # Versuche die ISIN zu holen
         try:
             isin = stock.get_isin()
             if not isin or isin == '-':
                 isin = "Nicht verfügbar"
         except Exception:
             isin = "Nicht verfügbar"
-            
         return {"isin": isin, "name": company_name}
     except Exception:
         return {"isin": "Nicht verfügbar", "name": ticker}
 
 # ==============================================================================
-# 1. KORRIGIERTE RSI FUNKTION (WILDER'S SMOOTHING)
+# TECHNISCHE INDIKATOREN (RSI & MACD)
 # ==============================================================================
 def calculate_rsi(series, period=14):
     delta = series.diff()
@@ -57,6 +51,16 @@ def calculate_rsi(series, period=14):
     avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
+
+def calculate_macd(series, fast=12, slow=26, signal=9):
+    ema_fast = series.ewm(span=fast, adjust=False).mean()
+    ema_slow = series.ewm(span=slow, adjust=False).mean()
+    macd = ema_fast - ema_slow
+    macd_signal = macd.ewm(span=signal, adjust=False).mean()
+    macd_hist = macd - macd_signal
+    # Prozentuale Abweichung von der Null-Linie (Percentage Price Oscillator Ansatz)
+    macd_pct = (macd / ema_slow) * 100
+    return macd, macd_signal, macd_hist, macd_pct
 
 def get_wikipedia_table(url, match_index=0):
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -81,49 +85,54 @@ st.sidebar.header("📈 Chart-Signale")
 golden_cross_active = st.sidebar.toggle("Nur mit Golden Cross (letzte 14 Tage)", value=False)
 
 # ==============================================================================
-# 3. POP-UP (DETAILS, CACHED LIVE-KURS & MULTI-TIMEFRAME CHARTS)
+# 3. POP-UP (DETAILS, METRIKEN & 3-STUFEN TIMEFRAME CHARTS)
 # ==============================================================================
 @st.dialog("📊 Aktien-Details & Signal", width="large")
 def show_details_popup(ticker):
     with st.spinner("Lade optimierte Daten aus dem Cache..."):
         try:
-            # 1. Basis-Tagesdaten aus dem Cache laden
             df_base = load_cached_history(ticker, "1y", "1d")
             
             if df_base.empty:
-                st.error("Yahoo Finance blockiert gerade temporär Anfragen (Rate Limit). Bitte warte 1-2 Minuten, bevor du diese Aktie erneut analysierst.")
+                st.error("Yahoo Finance blockiert gerade temporär Anfragen (Rate Limit). Bitte warte 1-2 Minuten.")
                 return
             
-            # 2. Live-Kurs ressourcenschonend aus dem letzten Schlusskurs extrahieren
             current_price = df_base['Close'].iloc[-1]
             
-            # 3. Stammdaten (ISIN & Name) aus dem Langzeit-Cache laden
             meta = load_cached_meta(ticker)
             isin = meta["isin"]
             company_name = meta["name"]
             
-            # Hier wird nun der ausgeschriebene Name groß angezeigt
-            st.write(f"## {company_name} (`{ticker}`)")
-            
-            meta_col1, meta_col2 = st.columns(2)
-            with meta_col1:
-                st.metric("Aktueller Kurs (Zeitverzögert)", f"{current_price:,.2f}")
-            with meta_col2:
-                st.write(f"**Identifikation:** ISIN/WKN: `{isin}`")
-                tv_ticker = ticker.split('.')[0]
-                tradingview_url = f"https://de.tradingview.com/symbols/{tv_ticker}/"
-                st.markdown(f"[➡️ **Auf TradingView.de analysieren**]({tradingview_url})")
-            
-            st.write("---")
-            
-            # Technische Indikatoren berechnen
+            # Technische Indikatoren für Basis-Daten berechnen
             df_base['RSI'] = calculate_rsi(df_base['Close'], period=14)
             df_base['SMA50'] = df_base['Close'].rolling(window=50).mean()
             df_base['SMA200'] = df_base['Close'].rolling(window=200).mean()
+            df_base['MACD'], df_base['MACD_Signal'], df_base['MACD_Hist'], df_base['MACD_Pct'] = calculate_macd(df_base['Close'])
+            
             df_base['Above'] = df_base['SMA50'] > df_base['SMA200']
             df_base['Crossover'] = df_base['Above'] & (~df_base['Above'].shift(1).fillna(True))
             recent_golden_cross = df_base['Crossover'].tail(14).any()
+            
             rsi_aktuell = df_base['RSI'].iloc[-1]
+            macd_pct_aktuell = df_base['MACD_Pct'].iloc[-1]
+            
+            st.write(f"## {company_name} (`{ticker}`)")
+            
+            # KPI Dashboard mit Kurs, RSI und MACD %-Abstand zur Null-Linie
+            meta_col1, meta_col2, meta_col3, meta_col4 = st.columns(4)
+            with meta_col1:
+                st.metric("Live-Kurs (ca.)", f"{current_price:,.2f}")
+            with meta_col2:
+                st.metric("RSI (14) Aktuell", f"{rsi_aktuell:.2f}")
+            with meta_col3:
+                st.metric("MACD vs. Null-Linie", f"{macd_pct_aktuell:+.2f}%")
+            with meta_col4:
+                st.write(f"**Identifikation:** WKN/ISIN: `{isin}`")
+                tv_ticker = ticker.split('.')[0]
+                tradingview_url = f"https://de.tradingview.com/symbols/{tv_ticker}/"
+                st.markdown(f"[➡️ **Auf TradingView**]({tradingview_url})")
+            
+            st.write("---")
             
             # Signal-Ampel Logik
             if rsi_aktuell > 70:
@@ -139,7 +148,7 @@ def show_details_popup(ticker):
                     grund = "Es gab ein frisches Golden Cross (SMA50 schneidet SMA200) in den letzten 14 Tagen."
             else:
                 ampel_signal = "🟡 HALTEN (Hold)"
-                grund = "Die Aktie befindet sich auf Tagesbasis im Antwortbereich im neutralen Sektor."
+                grund = "Die Aktie befindet sich auf Tagesbasis im neutralen Sektor."
             
             st.markdown(f"### Signal-Ampel (Tagesbasis): {ampel_signal}")
             st.caption(f"**Grund:** {grund}")
@@ -154,19 +163,29 @@ def show_details_popup(ticker):
                     return
                 
                 df_chart['RSI'] = calculate_rsi(df_chart['Close'], period=14)
+                df_chart['MACD'], df_chart['MACD_Signal'], df_chart['MACD_Hist'], _ = calculate_macd(df_chart['Close'])
                 
-                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08, row_heights=[0.6, 0.4])
+                # Erstellung von 3 Zeilen (1. Kurs/SMAs, 2. RSI, 3. MACD)
+                fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.06, row_heights=[0.45, 0.25, 0.30])
+                
+                # Zeile 1: Kurs-Chart
                 fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['Close'], mode='lines', name='Kurs', line=dict(color='#1f77b4', width=2)), row=1, col=1)
-                
                 if 'SMA50' in df_chart.columns:
                     fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['SMA50'], mode='lines', name='SMA 50', line=dict(color='orange', width=1.5)), row=1, col=1)
                     fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['SMA200'], mode='lines', name='SMA 200', line=dict(color='red', width=1.5)), row=1, col=1)
                 
+                # Zeile 2: RSI-Chart
                 fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['RSI'], mode='lines', name='RSI 14', line=dict(color='purple', width=1.5)), row=2, col=1)
                 fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
                 fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
                 
-                fig.update_layout(height=400, margin=dict(l=10, r=10, t=10, b=10), showlegend=True, yaxis2=dict(range=[0, 100]))
+                # Zeile 3: MACD mit geglättetem Average und Histogramm
+                fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['MACD'], mode='lines', name='MACD', line=dict(color='blue', width=1.5)), row=3, col=1)
+                fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['MACD_Signal'], mode='lines', name='Signal (Geglättet)', line=dict(color='orange', width=1.5)), row=3, col=1)
+                fig.add_trace(gr.Bar(x=df_chart.index, y=df_chart['MACD_Hist'], name='Histogramm', marker_color='lightgray', opacity=0.7), row=3, col=1)
+                fig.add_hline(y=0, line_dash="solid", line_color="gray", row=3, col=1)
+                
+                fig.update_layout(height=580, margin=dict(l=10, r=10, t=10, b=10), showlegend=True, yaxis2=dict(range=[0, 100]))
                 st.plotly_chart(fig, use_container_width=True)
 
             with tab1:
