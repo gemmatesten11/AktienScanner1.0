@@ -46,8 +46,8 @@ def get_wikipedia_table(url, match_index=0):
 # ==============================================================================
 # 3. BENUTZEROBERFLÄCHE (STREAMLIT)
 # ==============================================================================
-st.title("🤖 KI-Markt- & Branchen-Scanner v2.2")
-st.write("Schneller, blockierungsfreier Live-Scan über 20 globale Indizes.")
+st.title("🤖 KI-Markt- & Branchen-Scanner v2.3")
+st.write("Massen-Live-Scan mit Candlestick-Charts, RSI, MACD und KI-Analyse.")
 
 markt = st.selectbox(
     "1. Welchen Index möchtest du scannen?",
@@ -75,15 +75,11 @@ markt = st.selectbox(
     )
 )
 
-# Filter-Modus, um die Yahoo-Sperre komplett zu umgehen
-filter_modus = st.radio(
-    "2. Wie möchtest du filtern?",
-    ("💥 Voller Index-Scan (Empfohlen - Schnell & Sicher)", "🔍 Nach Branche filtern (Achtung: Kann bei großen Indizes blockiert werden)")
-)
-
+# Deine Branchenauswahl inklusive "Alle Branchen"
 branche = st.selectbox(
-    "3. Sektor auswählen (Nur aktiv, wenn Branchen-Filter gewählt ist):",
+    "2. Welche Branche möchtest du filtern?",
     (
+        "Alle Branchen",
         "Informationstechnologie (Software, Hardware, Halbleiter)",
         "Gesundheitswesen (Pharma, Biotech, Medizintechnik)",
         "Finanzwesen (Banken, Versicherungen, Dienstleister)",
@@ -112,11 +108,11 @@ sektor_mapping = {
     "Grundstoffe / Rohstoffe": ["Basic Materials"]
 }
 
-# Strategie-Tuning direkt in der UI
+# Strategie-Tuning in der Sidebar
 st.sidebar.header("⚙️ Strategie-Anpassung")
-rsi_min = st.sidebar.slider("RSI Minimum", 10, 50, 45) # Von 55 auf 45 gesenkt für mehr Treffer beim Testen
-rsi_max = st.sidebar.slider("RSI Maximum", 50, 90, 70) # Von 65 auf 70 erweitert
-vol_mult = st.sidebar.slider("Volumen-Faktor (x des Schnitts)", 0.5, 2.0, 1.0) # Auf 1.0 gesenkt
+rsi_min = st.sidebar.slider("RSI Minimum", 10, 50, 45)
+rsi_max = st.sidebar.slider("RSI Maximum", 50, 90, 70)
+vol_mult = st.sidebar.slider("Volumen-Faktor (x des Schnitts)", 0.5, 2.0, 1.0)
 
 # ==============================================================================
 # 4. TICKER LADEN
@@ -149,25 +145,22 @@ if st.button("🚀 Scan Starten"):
                 table = get_wikipedia_table("https://en.wikipedia.org/wiki/CAC_40", 4)
                 tickers = [t + ".PA" for t in table['Ticker'].tolist()]
             else:
-                # Fallback für die restlichen Indizes
                 tickers = ["AAPL", "MSFT", "NVDA", "SAP", "SIE.DE", "7203.T", "SHEL.L", "CBA.AX"]
         except Exception as e:
             st.error(f"Fehler beim Laden des Index: {e}")
             tickers = []
 
     # ==============================================================================
-    # 5. TURBO-MASSEN-DOWNLOAD (VERHINDERT YAHOO-BLOCKADE)
+    # 5. DOWNLOAD & ANALYSE
     # ==============================================================================
     if tickers:
-        # Begrenzung für Riesen-Indizes beim Testen, damit Streamlit nicht abstürzt
-        if len(tickers) > 100 and "Voller Index" in filter_modus:
-            st.warning("Index sehr groß. Scanne die ersten 100 Werte für maximale Stabilität...")
+        if len(tickers) > 100:
+            st.warning("Index sehr groß. Scanne die ersten 100 Werte für maximale Geschwindigkeit...")
             tickers = tickers[:100]
 
-        st.info(f"Lade Live-Kursdaten für {len(tickers)} Aktien in einem Paket herunter...")
+        st.info(f"Lade Live-Kursdaten für {len(tickers)} Aktien im Paket herunter...")
         
         try:
-            # Wir laden alle Daten auf einmal! Ein einziger Server-Call.
             data = yf.download(tickers, period="3mo", interval="1d", group_by='ticker', progress=False)
         except Exception as e:
             st.error(f"Fehler beim Massen-Download: {e}")
@@ -178,13 +171,11 @@ if st.button("🚀 Scan Starten"):
             st.info("Analysiere Daten auf Muster...")
             progress_bar = st.progress(0)
             
-            # Wenn der Branchen-Modus aktiv ist, müssen wir filtern
             with st.spinner("Verarbeite Signale..."):
                 for idx, ticker in enumerate(tickers):
                     progress_bar.progress((idx + 1) / len(tickers))
                     
                     try:
-                        # Extrahiere die Kursdaten für die einzelne Aktie aus dem Massenpaket
                         if len(tickers) == 1:
                             df = data.copy()
                         else:
@@ -193,20 +184,20 @@ if st.button("🚀 Scan Starten"):
                         if df.empty or len(df) < 25: 
                             continue
                         
-                        # Branchen-Prüfung nur, wenn explizit ausgewählt
-                        if "Nach Branche filtern" in filter_modus:
+                        # Branchen-Prüfung (Wird übersprungen, wenn "Alle Branchen" gewählt ist)
+                        if "Alle Branchen" not in branche:
                             t_info = yf.Ticker(ticker).info
                             if t_info.get("sector", "") not in sektor_mapping.get(branche, []):
                                 continue
 
-                        # Indikatoren-Berechnung
+                        # Indikatoren berechnen
                         df['RSI'] = calculate_rsi(df['Close'], period=14)
                         df['MACD'], df['MACD_Signal'] = calculate_macd(df['Close'])
                         
                         last = df.iloc[-1]
                         avg_vol = df['Volume'].tail(15).mean()
                         
-                        # Abgleich mit den Reglern aus der linken Seitenleiste
+                        # Filter abgleichen
                         rsi_ok = rsi_min <= last['RSI'] <= rsi_max
                         macd_ok = last['MACD'] > last['MACD_Signal']
                         vol_ok = last['Volume'] > (avg_vol * vol_mult)
@@ -215,32 +206,4 @@ if st.button("🚀 Scan Starten"):
                             found_counter += 1
                             st.success(f"🎯 Treffer #{found_counter}: **{ticker}**")
                             
-                            prompt = (f"Aktie {ticker}: RSI ist {last['RSI']:.1f}, "
-                                      f"Volumen liegt bei {last['Volume']/avg_vol:.1f}x des Durchschnitts. "
-                                      f"Gib eine extrem kurze, professionelle Trading-Einschätzung (max. 2 Sätze).")
-                            
-                            response = model.generate_content(prompt)
-                            st.info(f"**Gemini-Analyse:** {response.text}")
-                            
-                            with st.expander(f"📊 Charts für {ticker}"):
-                                fig_rsi = gr.Figure()
-                                fig_rsi.add_trace(gr.Scatter(x=df.index, y=df['RSI'], mode='lines', name='RSI', line=dict(color='purple')))
-                                fig_rsi.add_hline(y=rsi_max, line_dash="dash", line_color="green")
-                                fig_rsi.add_hline(y=rsi_min, line_dash="dash", line_color="orange")
-                                fig_rsi.update_layout(title=f"RSI14 (Aktuell: {last['RSI']:.1f})", yaxis=dict(range=[10, 90]), height=200, margin=dict(l=20, r=20, t=40, b=20))
-                                st.plotly_chart(fig_rsi, use_container_width=True)
-                                
-                                fig_macd = gr.Figure()
-                                fig_macd.add_trace(gr.Scatter(x=df.index, y=df['MACD'], mode='lines', name='MACD', line=dict(color='blue')))
-                                fig_macd.add_trace(gr.Scatter(x=df.index, y=df['MACD_Signal'], mode='lines', name='Signal', line=dict(color='orange')))
-                                st.plotly_chart(fig_macd, use_container_width=True)
-                            st.divider()
-                            
-                    except:
-                        continue
-            
-            if found_counter == 0:
-                st.warning("Scan beendet. Aktuell erfüllt kein Titel dieses Profil. Versuche die Regler links anzupassen!")
-            else:
-                st.balloons()
-                st.success(f"Scan abgeschlossen! {found_counter} Setups gefunden.")
+                            prompt = (f"Aktie {ticker}: RSI ist {last['RSI']:.
