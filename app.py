@@ -24,15 +24,27 @@ def load_cached_history(ticker, period, interval):
 
 @st.cache_data(ttl=86400)  # Stammdaten ändern sich selten, 24 Std. Cache
 def load_cached_meta(ticker):
-    # Extrem vorsichtiger Abruf, um Rate Limits zu umgehen
+    # Holt ISIN und den ausgeschriebenen Namen stark abgesichert und im Cache
     try:
         stock = yf.Ticker(ticker)
-        isin = stock.get_isin()
-        if not isin or isin == '-':
+        
+        # Versuche den echten Firmennamen zu holen, Fallback auf Ticker
+        try:
+            company_name = stock.info.get('longName', ticker)
+        except Exception:
+            company_name = ticker
+            
+        # Versuche die ISIN zu holen
+        try:
+            isin = stock.get_isin()
+            if not isin or isin == '-':
+                isin = "Nicht verfügbar"
+        except Exception:
             isin = "Nicht verfügbar"
-        return {"isin": isin}
+            
+        return {"isin": isin, "name": company_name}
     except Exception:
-        return {"isin": "Nicht verfügbar"}
+        return {"isin": "Nicht verfügbar", "name": ticker}
 
 # ==============================================================================
 # 1. KORRIGIERTE RSI FUNKTION (WILDER'S SMOOTHING)
@@ -85,11 +97,13 @@ def show_details_popup(ticker):
             # 2. Live-Kurs ressourcenschonend aus dem letzten Schlusskurs extrahieren
             current_price = df_base['Close'].iloc[-1]
             
-            # 3. Stammdaten (ISIN) aus dem Langzeit-Cache laden
+            # 3. Stammdaten (ISIN & Name) aus dem Langzeit-Cache laden
             meta = load_cached_meta(ticker)
             isin = meta["isin"]
+            company_name = meta["name"]
             
-            st.write(f"## Analyse für Aktie: `{ticker}`")
+            # Hier wird nun der ausgeschriebene Name groß angezeigt
+            st.write(f"## {company_name} (`{ticker}`)")
             
             meta_col1, meta_col2 = st.columns(2)
             with meta_col1:
@@ -125,7 +139,7 @@ def show_details_popup(ticker):
                     grund = "Es gab ein frisches Golden Cross (SMA50 schneidet SMA200) in den letzten 14 Tagen."
             else:
                 ampel_signal = "🟡 HALTEN (Hold)"
-                grund = "Die Aktie befindet sich auf Tagesbasis im neutralen Sektor."
+                grund = "Die Aktie befindet sich auf Tagesbasis im Antwortbereich im neutralen Sektor."
             
             st.markdown(f"### Signal-Ampel (Tagesbasis): {ampel_signal}")
             st.caption(f"**Grund:** {grund}")
