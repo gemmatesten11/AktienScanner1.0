@@ -45,19 +45,25 @@ st.sidebar.header("📈 Chart-Signale")
 golden_cross_active = st.sidebar.toggle("Nur mit Golden Cross (letzte 14 Tage)", value=False)
 
 # ==============================================================================
-# 3. POP-UP (DETAILS & SIGNAL-AMPEL)
+# 3. POP-UP (DETAILS, LIVE-KURS & MULTI-TIMEFRAME CHARTS)
 # ==============================================================================
 @st.dialog("📊 Aktien-Details & Signal", width="large")
 def show_details_popup(ticker):
-    with st.spinner("Lade Daten und Berechne Indikatoren..."):
+    with st.spinner("Lade Live-Kurse und Zeitfenster..."):
         try:
             stock = yf.Ticker(ticker)
+            
+            # Stammdaten abrufen
             try:
                 company_name = stock.info.get('longName', ticker)
+                # Aktuellen Live-Kurs aus den Info-Daten ziehen
+                current_price = stock.info.get('regularMarketPrice', None)
+                currency = stock.info.get('currency', '$')
             except Exception:
                 company_name = ticker
+                current_price = None
+                currency = ""
             
-            # ISIN holen (Yahoo Finance liefert ISIN statt WKN)
             try:
                 isin = stock.get_isin()
                 if not isin or isin == '-':
@@ -66,59 +72,106 @@ def show_details_popup(ticker):
                 isin = "Nicht verfügbar"
                 
             st.write(f"## {company_name} (`{ticker}`)")
-            st.write(f"**Identifikation:** ISIN/WKN: `{isin}`")
             
-            # TradingView-Link generieren (Clean Ticker ohne Suffixe wie .DE oder .L für US/DE Aktien)
-            tv_ticker = ticker.split('.')[0]
-            tradingview_url = f"https://www.tradingview.com/symbols/{tv_ticker}/"
-            st.markdown(f"[➡️ **Auf TradingView analysieren**]({tradingview_url})")
-            st.write("") # Abstandhalter
-            
-            df = stock.history(period="1y", interval="1d")
-            df['RSI'] = calculate_rsi(df['Close'], period=14)
-            
-            df['SMA50'] = df['Close'].rolling(window=50).mean()
-            df['SMA200'] = df['Close'].rolling(window=200).mean()
-            
-            # Exakte Crossover-Logik
-            df['Above'] = df['SMA50'] > df['SMA200']
-            df['Crossover'] = df['Above'] & (~df['Above'].shift(1).fillna(True))
-            recent_golden_cross = df['Crossover'].tail(14).any()
-            
-            rsi_aktuell = df['RSI'].iloc[-1]
-            df_last30 = df.tail(30)
-            
-            if rsi_aktuell < 30 or recent_golden_cross:
-                ampel_signal = "🟢 KAUFEN (Buy)"
-                grund = "Der RSI ist überverkauft (< 30) oder es gab ein frisches Golden Cross in den letzten 14 Tagen."
-            elif rsi_aktuell > 70:
-                ampel_signal = "🔴 VERKAUFEN (Sell)"
-                grund = "Der RSI ist überkauft (> 70). Korrekturrisiko erhöht."
-            else:
-                ampel_signal = "🟡 HALTEN (Hold)"
-                grund = "RSI ist im neutralen Bereich und kein akutes Ausbruchsignal aus den letzten 14 Tagen vorhanden."
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Aktueller RSI-Wert", f"{rsi_aktuell:.2f}")
-            with col2:
-                st.markdown(f"### Signal-Ampel: {ampel_signal}")
-                st.caption(f"**Grund:** {grund}")
+            # Layout für Kennzahlen (Kurs + ISIN)
+            meta_col1, meta_col2 = st.columns(2)
+            with meta_col1:
+                if current_price:
+                    st.metric("Aktueller Live-Kurs", f"{current_price:,.2f} {currency}")
+                else:
+                    st.caption("Live-Kurs temporär nicht verfügbar")
+            with meta_col2:
+                st.write(f"**Identifikation:** ISIN/WKN: `{isin}`")
+                tv_ticker = ticker.split('.')[0]
+                tradingview_url = f"https://de.tradingview.com/symbols/{tv_ticker}/"
+                st.markdown(f"[➡️ **Auf TradingView.de analysieren**]({tradingview_url})")
             
             st.write("---")
-            st.write("### Chart-Analyse (Letzte 30 Handelstage)")
             
-            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08, row_heights=[0.6, 0.4])
-            fig.add_trace(gr.Scatter(x=df_last30.index, y=df_last30['Close'], mode='lines', name='Kurs', line=dict(color='#1f77b4', width=2)), row=1, col=1)
-            fig.add_trace(gr.Scatter(x=df_last30.index, y=df_last30['SMA50'], mode='lines', name='SMA 50', line=dict(color='orange', width=1.5)), row=1, col=1)
-            fig.add_trace(gr.Scatter(x=df_last30.index, y=df_last30['SMA200'], mode='lines', name='SMA 200', line=dict(color='red', width=1.5)), row=1, col=1)
+            # Basis-Daten laden (1 Jahr täglich) für die fundamentale Signal-Ampel
+            df_base = stock.history(period="1y", interval="1d")
+            df_base['RSI'] = calculate_rsi(df_base['Close'], period=14)
+            df_base['SMA50'] = df_base['Close'].rolling(window=50).mean()
+            df_base['SMA200'] = df_base['Close'].rolling(window=200).mean()
+            df_base['Above'] = df_base['SMA50'] > df_base['SMA200']
+            df_base['Crossover'] = df_base['Above'] & (~df_base['Above'].shift(1).fillna(True))
+            recent_golden_cross = df_base['Crossover'].tail(14).any()
+            rsi_aktuell = df_base['RSI'].iloc[-1]
             
-            fig.add_trace(gr.Scatter(x=df_last30.index, y=df_last30['RSI'], mode='lines+markers', name='RSI 14', line=dict(color='purple', width=2)), row=2, col=1)
-            fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-            fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+            # Signal-Ampel rendern
+            if rsi_aktuell > 70:
+                ampel_signal = "🔴 VERKAUFEN (Sell)"
+                grund = "Der RSI (Tagesbasis) ist überkauft (> 70). Das Korrekturrisiko ist kurzfristig erhöht."
+            elif rsi_aktuell < 30 or recent_golden_cross:
+                ampel_signal = "🟢 KAUFEN (Buy)"
+                if rsi_aktuell < 30 and recent_golden_cross:
+                    grund = "Starkes Signal! RSI ist überverkauft (< 30) UND es liegt ein frisches Golden Cross vor."
+                elif rsi_aktuell < 30:
+                    grund = "Der RSI ist überverkauft (< 30). Die Aktie ist technisch reif für eine Erholung."
+                else:
+                    grund = "Es gab ein frisches Golden Cross (SMA50 schneidet SMA200) in den letzten 14 Tagen."
+            else:
+                ampel_signal = "🟡 HALTEN (Hold)"
+                grund = "Die Aktie befindet sich im neutralen Tagesbereich. Kein akutes Ausbruchsignal vorhanden."
             
-            fig.update_layout(height=480, margin=dict(l=10, r=10, t=10, b=10), showlegend=True, yaxis2=dict(range=[0, 100]))
-            st.plotly_chart(fig, use_container_width=True)
+            st.markdown(f"### Signal-Ampel (Tagesbasis): {ampel_signal}")
+            st.caption(f"**Grund:** {grund}")
+            st.write("")
+
+            # ==============================================================================
+            # REITER (TABS) FÜR DIE VERSCHIEDENEN ZEITFENSTER
+            # ==============================================================================
+            tab1, tab2, tab3, tab4 = st.tabs(["⏱️ 10 Min", "⏱️ 30 Min", "⏳ 4 Std", "📅 1 Tag (Klassisch)"])
+            
+            # Hilfsfunktion, um redundanten Chart-Code zu vermeiden
+            def render_chart(df_chart, title_suffix):
+                if df_chart.empty or len(df_chart) < 2:
+                    st.warning(f"Keine ausreichenden Chartdaten für {title_suffix} verfügbar.")
+                    return
+                
+                # RSI berechnen für das spezifische Intervall
+                df_chart['RSI'] = calculate_rsi(df_chart['Close'], period=14)
+                
+                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08, row_heights=[0.6, 0.4])
+                fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['Close'], mode='lines', name='Kurs', line=dict(color='#1f77b4', width=2)), row=1, col=1)
+                
+                # SMAs nur auf sinnvollen großen Zeitfenstern (z.B. Tag) zeichnen, sonst wird es unübersichtlich
+                if 'SMA50' in df_chart.columns:
+                    fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['SMA50'], mode='lines', name='SMA 50', line=dict(color='orange', width=1.5)), row=1, col=1)
+                    fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['SMA200'], mode='lines', name='SMA 200', line=dict(color='red', width=1.5)), row=1, col=1)
+                
+                fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['RSI'], mode='lines', name='RSI 14', line=dict(color='purple', width=1.5)), row=2, col=1)
+                fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+                fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+                
+                fig.update_layout(height=400, margin=dict(l=10, r=10, t=10, b=10), showlegend=True, yaxis2=dict(range=[0, 100]))
+                st.plotly_chart(fig, use_container_width=True)
+
+            with tab1:
+                st.write("### 10-Minuten-Chart (Letzte 5 Handelstage)")
+                df_10m = stock.history(period="5d", interval="10m")
+                render_chart(df_10m, "10 Min")
+
+            with tab2:
+                st.write("### 30-Minuten-Chart (Letzte 14 Tage)")
+                df_30m = stock.history(period="14d", interval="30m")
+                render_chart(df_30m, "30 Min")
+
+            with tab3:
+                st.write("### 4-Stunden-Chart (Letzte 2 Monate)")
+                # Yahoo Finance kennt kein '4h' Intervall, nutzt aber '1h' oder '90m'. 
+                # Um exakte 4 Stunden abzubilden, resampeln wir die 1-Stunden-Bars.
+                df_1h = stock.history(period="60d", interval="1h")
+                if not df_1h.empty:
+                    df_4h = df_1h.resample('4h').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}).dropna()
+                else:
+                    df_4h = pd.DataFrame()
+                render_chart(df_4h, "4 Std")
+
+            with tab4:
+                st.write("### 1-Tages-Chart (Letzte 30 Handelstage im Fokus)")
+                df_day_focus = df_base.tail(30)
+                render_chart(df_day_focus, "1 Tag")
             
         except Exception as e:
             st.error(f"Fehler beim Laden der Details: {e}")
@@ -179,59 +232,4 @@ if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
         with st.spinner(f"Scanne {len(tickers)} Aktien zufällig verteilt parallel..."):
             try:
                 download_period = "1y" if golden_cross_active else "3mo"
-                data = yf.download(tickers, period=download_period, interval="1d", group_by='ticker', progress=False)
-                
-                for ticker in tickers:
-                    if len(tickers) > 1:
-                        if ticker not in data.columns.levels[0]: 
-                            continue
-                        df = data[ticker].dropna(subset=['Close'])
-                    else:
-                        df = data.copy().dropna(subset=['Close'])
-                        
-                    if df.empty or len(df) < 15: 
-                        continue
-                    
-                    df['RSI'] = calculate_rsi(df['Close'], period=14)
-                    rsi_aktuell = df['RSI'].iloc[-1]
-                    
-                    if not (rsi_min <= rsi_aktuell <= rsi_max):
-                        continue
-                    
-                    if golden_cross_active:
-                        if len(df) < 200: 
-                            continue
-                        df['SMA50'] = df['Close'].rolling(window=50).mean()
-                        df['SMA200'] = df['Close'].rolling(window=200).mean()
-                        
-                        df['Above'] = df['SMA50'] > df['SMA200']
-                        df['Crossover'] = df['Above'] & (~df['Above'].shift(1).fillna(True))
-                        
-                        if not df['Crossover'].tail(14).any():
-                            continue
-                    
-                    st.session_state.scan_results.append({
-                        "ticker": ticker,
-                        "rsi": f"{rsi_aktuell:.2f}"
-                    })
-            except Exception as e:
-                st.error(f"Fehler beim Daten-Download: {e}")
-
-# ==============================================================================
-# 6. ERGEBNISSE RENDERN
-# ==============================================================================
-if st.session_state.has_scanned:
-    st.write("---")
-    if st.session_state.scan_results:
-        st.write(f"### 🎯 Treffer im gewählten Bereich ({len(st.session_state.scan_results)})")
-        cols = st.columns(3)
-        for idx, item in enumerate(st.session_state.scan_results):
-            col_target = cols[idx % 3]
-            with col_target:
-                with st.container(border=True):
-                    st.write(f"**{item['ticker']}**")
-                    st.write(f"Aktueller RSI: `{item['rsi']}`")
-                    if st.button("📊 Analysieren", key=f"btn_{item['ticker']}_{idx}"):
-                        show_details_popup(item["ticker"])
-    else:
-        st.warning("Keine Aktien mit den gewählten Kriterien gefunden. Klicke einfach nochmal auf Scannen für 60 andere Zufallsaktien.")
+                data = yf.download(tickers, period=download_period, interval
