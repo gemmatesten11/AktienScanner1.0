@@ -194,6 +194,59 @@ st.sidebar.write("---")
 st.sidebar.header("📈 Chart-Signale")
 golden_cross_active = st.sidebar.toggle("Nur mit Golden Cross (letzte 14 Tage)", value=False)
 
+st.sidebar.write("---")
+st.sidebar.header("🔍 Direkte Aktiensuche")
+
+# Funktion, um Live-Vorschläge von Yahoo Finance abzurufen
+def get_ticker_suggestions(query):
+    if not query or len(query) < 2:
+        return []
+    try:
+        # Nutzt die interne Yahoo Finance Ticker-Suche
+        url = f"https://query2.finance.yahoo.com/v1/finance/search?q={urllib.parse.quote(query)}&quotesCount=5&newsCount=0"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as response:
+            import json
+            data = json.loads(response.read().decode('utf-8'))
+            suggestions = []
+            for quote in data.get('quotes', []):
+                # Nur Aktien (EQUITY) oder ETFs zulassen
+                if quote.get('quoteType') in ['EQUITY', 'ETF']:
+                    symbol = quote.get('symbol')
+                    name = quote.get('shortname', quote.get('longname', 'Unbekannt'))
+                    suggestions.append({"label": f"{symbol} - {name}", "ticker": symbol, "name": name})
+            return suggestions
+    except Exception:
+        return []
+
+# Eingabefeld für den Suchbegriff (Name oder Ticker)
+search_query = st.sidebar.text_input("Aktienname oder Ticker eingeben:", placeholder="z.B. Apple oder AAPL")
+
+if search_query:
+    suggestions = get_ticker_suggestions(search_query)
+    
+    if suggestions:
+        # Erstellt eine Liste von lesbaren Optionen für die Selectbox
+        options_dict = {item["label"]: item for item in suggestions}
+        
+        # Die Selectbox fungiert hier als Dropdown für die Autovervollständigung
+        selected_label = st.sidebar.selectbox(
+            "Gefundene Treffer:", 
+            options_dict.keys(),
+            index=0,
+            key="search_autocomplete"
+        )
+        
+        if selected_label:
+            selected_stock = options_dict[selected_label]
+            
+            # Button zum Starten der Analyse für die gefundene Aktie
+            if st.sidebar.button(f"📊 {selected_stock['ticker']} analysieren", use_container_width=True):
+                # Triggert dein bereits existierendes Dialog-Fenster (Pop-up)
+                show_details_popup(selected_stock["ticker"], selected_stock["name"])
+    else:
+        st.sidebar.caption(" Keine Vorschläge gefunden. Bitte genauer eingeben.")
+
 # ==============================================================================
 # 3. POP-UP (AKTIENNAME & BOLLINGER CHART INTEGRATION)
 # ==============================================================================
