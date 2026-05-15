@@ -4,6 +4,7 @@ import pandas as pd
 import os
 import urllib.request
 import google.generativeai as genai
+import plotly.graph_objects as gr  # Für die interaktiven Charts
 
 # Gemini API konfigurieren
 GOOGLE_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -28,9 +29,8 @@ def calculate_macd(series, slow=26, fast=12, signal=9):
     signal_line = macd_line.ewm(span=signal, adjust=False).mean()
     return macd_line, signal_line
 
-# Hilfsfunktion, um Wikipedia-Listen trotz Bot-Schutz (403 Error) zu laden
+# Hilfsfunktion für Wikipedia (User-Agent gegen 403 Error)
 def get_wikipedia_table(url, match_index=0):
-    # Wir tarnen uns als normaler Google Chrome Browser
     req = urllib.request.Request(
         url, 
         headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
@@ -65,7 +65,7 @@ branche = st.selectbox(
         "Energie, Öl & Gas",
         "Rohstoffe & Bergbau",
         "Lebensmittel & Agrar",
-        "Lifestyle, Luxus & Konsum",
+        "Lifestyle, Luxus &amp; Konsum",
         "Finanzen & Banken",
         "Gesundheit & Pharma"
     )
@@ -166,13 +166,38 @@ if st.button("🚀 Scan Starten"):
                         found_counter += 1
                         st.success(f"🎯 Treffer #{found_counter} ({branche}): **{ticker}** erfüllt alle Kriterien!")
                         
-                        # Prompt für Google Gemini
+                        # Gemini KI-Einschätzung
                         prompt = (f"Aktie {ticker} aus der Branche {branche}: "
                                   f"RSI ist {last['RSI']:.1f}, Volumen liegt bei {last['Volume']/avg_vol:.1f}x des Durchschnitts. "
                                   f"Gib eine extrem kurze, professionelle Trading-Einschätzung (max. 2 Sätze).")
                         
                         response = model.generate_content(prompt)
                         st.info(f"**Gemini-Analyse:** {response.text}")
+                        
+                        # NEU: Aufklappbares Fenster für die Charts
+                        with st.expander(f"📊 Technische Charts für {ticker} anzeigen"):
+                            
+                            # 1. RSI Chart erzeugen
+                            fig_rsi = gr.Figure()
+                            fig_rsi.add_trace(gr.Scatter(x=df.index, y=df['RSI'], mode='lines', name='RSI (14)', line=dict(color='purple')))
+                            # Hilfslinien für Strategie-Bereich (55 - 65) und Standard-Grenzen
+                            fig_rsi.add_hline(y=65, line_dash="dash", line_color="green", annotation_text="Strategie Max (65)")
+                            fig_rsi.add_hline(y=55, line_dash="dash", line_color="orange", annotation_text="Strategie Min (55)")
+                            fig_rsi.add_hline(y=70, line_dash="dot", line_color="red", annotation_text="Overbought (70)")
+                            fig_rsi.add_hline(y=30, line_dash="dot", line_color="blue", annotation_text="Oversold (30)")
+                            fig_rsi.update_layout(title=f"RSI (Aktueller Wert: {last['RSI']:.1f})", yaxis=dict(range=[10, 90]), height=250, margin=dict(l=20, r=20, t=40, b=20))
+                            st.plotly_chart(fig_rsi, use_container_width=True)
+                            
+                            # 2. MACD Chart erzeugen
+                            fig_macd = gr.Figure()
+                            fig_macd.add_trace(gr.Scatter(x=df.index, y=df['MACD'], mode='lines', name='MACD', line=dict(color='blue')))
+                            fig_macd.add_trace(gr.Scatter(x=df.index, y=df['MACD_Signal'], mode='lines', name='Signal', line=dict(color='orange')))
+                            # Histogramm (Differenz) zeichnen
+                            df['Histogramm'] = df['MACD'] - df['MACD_Signal']
+                            fig_macd.add_trace(gr.Bar(x=df.index, y=df['Histogramm'], name='Histogramm', marker_color='gray', opacity=0.4))
+                            fig_macd.update_layout(title="MACD Indikator (Bullish Crossover)", height=250, margin=dict(l=20, r=20, t=40, b=20))
+                            st.plotly_chart(fig_macd, use_container_width=True)
+                        
                         st.divider()
                         
                 except Exception:
