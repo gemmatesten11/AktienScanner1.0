@@ -34,7 +34,7 @@ def calculate_macd(series, slow=26, fast=12, signal=9):
     signal_line = macd_line.ewm(span=signal, adjust=False).mean()
     return macd_line, signal_line
 
-# Hilfsfunktion für Wikipedia (User-Agent gegen 403 Error & StringIO gegen Pfad-Fehler)
+# Hilfsfunktion für Wikipedia-Scraping (Browser-Tarnung)
 def get_wikipedia_table(url, match_index=0):
     req = urllib.request.Request(
         url, 
@@ -50,101 +50,159 @@ def get_wikipedia_table(url, match_index=0):
 # ==============================================================================
 # 3. BENUTZEROBERFLÄCHE (STREAMLIT)
 # ==============================================================================
-st.title("🤖 KI-Markt- & Branchen-Scanner")
-st.write("Wähle Index und Branche. Der Agent filtert den Markt nach deiner RSI-MACD-Volumen-Strategie.")
+st.title("🤖 KI-Markt- & Branchen-Scanner v2.1")
+st.write("Wähle aus 20 globalen Indizes und filtere den Markt nach RSI-MACD-Volumen-Signalen.")
 
-# Auswahlfelder
+# Index-Auswahl
 markt = st.selectbox(
     "1. Welchen Index möchtest du scannen?",
     (
-        "S&P 500 (USA - Große Unternehmen)", 
-        "NASDAQ 100 (USA - Technologie)", 
-        "DAX (Deutschland)", 
-        "FTSE 100 (Großbritannien)", 
-        "All-World (Auswahl globaler Top-Unternehmen)"
+        "S&P 500 (USA) - Top 500 US-Unternehmen",
+        "NASDAQ-100 (USA) - Große Tech- & Nicht-Finanzwerte",
+        "Dow Jones Industrial Average (USA) - 30 Blue-Chips",
+        "MSCI World (Welt) - Repräsentative Global-Auswahl",
+        "NASDAQ Composite (USA) - Repräsentative Tech-Auswahl",
+        "NYSE Composite (USA) - Repräsentative Industriepower",
+        "EURO STOXX 50 (Eurozone) - Die 50 größten Euro-Werte",
+        "FTSE 100 (UK) - Die 100 größten Londoner Aktien",
+        "DAX 40 (Deutschland) - Deutscher Leitindex",
+        "CAC 40 (Frankreich) - Pariser Leitindex",
+        "FTSE MIB (Italien) - Hauptindex Mailänder Börse",
+        "IBEX 35 (Spanien) - Wichtigste spanische Werte",
+        "SMI (Schweiz) - Schweizer Blue-Chips",
+        "AEX-Index (Niederlande) - Amsterdamer Leitindex",
+        "Nikkei 225 (Japan) - Leitindex Tokio (225 Werte)",
+        "Shanghai Composite (China) - Festlandchina Top-Auswahl",
+        "Hang Seng Index (Hongkong) - Hongkonger Leitindex",
+        "NIFTY 50 (Indien) - Indischer Leitindex",
+        "TOPIX (Japan) - Breiter japanischer Markt",
+        "S&P/ASX 200 (Australien) - 200 größte australische Aktien"
     )
 )
 
+# Deine neue Branchen-Liste
 branche = st.selectbox(
     "2. Welche Branche möchtest du filtern?",
     (
         "Alle Branchen",
-        "Technologie & Software",
-        "Halbleiter (Semiconductors)",
-        "Energie, Öl & Gas",
-        "Rohstoffe & Bergbau",
-        "Lebensmittel & Agrar",
-        "Lifestyle, Luxus & Konsum",
-        "Finanzen & Banken",
-        "Gesundheit & Pharma"
+        "Informationstechnologie (Software, Hardware, Halbleiter)",
+        "Gesundheitswesen (Pharma, Biotech, Medizintechnik)",
+        "Finanzwesen (Banken, Versicherungen, Dienstleister)",
+        "Nicht-Basiskonsumgüter / Zykliker (Auto, Hotels, Handel)",
+        "Kommunikationsdienste (Telekom, Soziale Netzwerke)",
+        "Industrie (Maschinenbau, Luftfahrt, Logistik)",
+        "Basiskonsumgüter / Defensiv (Lebensmittel, Haushalt)",
+        "Energie (Öl, Gas, erneuerbare Energien)",
+        "Versorgungsunternehmen (Strom, Wasser, Gas)",
+        "Immobilien (Immobilien-AGs, REITs)",
+        "Grundstoffe / Rohstoffe"
     )
 )
 
+# Mappt deine Bezeichnungen auf die offiziellen Sektoren von Yahoo Finance
 sektor_mapping = {
-    "Technologie & Software": ["Technology", "Communication Services"],
-    "Halbleiter (Semiconductors)": ["Semiconductors"],
-    "Energie, Öl & Gas": ["Energy"],
-    "Rohstoffe & Bergbau": ["Basic Materials"],
-    "Lebensmittel & Agrar": ["Consumer Defensive"],
-    "Lifestyle, Luxus & Konsum": ["Consumer Cyclical"],
-    "Finanzen & Banken": ["Financial Services"],
-    "Gesundheit & Pharma": ["Healthcare"]
+    "Informationstechnologie (Software, Hardware, Halbleiter)": ["Technology"],
+    "Gesundheitswesen (Pharma, Biotech, Medizintechnik)": ["Healthcare"],
+    "Finanzwesen (Banken, Versicherungen, Dienstleister)": ["Financial Services"],
+    "Nicht-Basiskonsumgüter / Zykliker (Auto, Hotels, Handel)": ["Consumer Cyclical"],
+    "Kommunikationsdienste (Telekom, Soziale Netzwerke)": ["Communication Services"],
+    "Industrie (Maschinenbau, Luftfahrt, Logistik)": ["Industrials"],
+    "Basiskonsumgüter / Defensiv (Lebensmittel, Haushalt)": ["Consumer Defensive"],
+    "Energie (Öl, Gas, erneuerbare Energien)": ["Energy"],
+    "Versorgungsunternehmen (Strom, Wasser, Gas)": ["Utilities"],
+    "Immobilien (Immobilien-AGs, REITs)": ["Real Estate"],
+    "Grundstoffe / Rohstoffe": ["Basic Materials"]
 }
 
 # ==============================================================================
-# 4. SCANNER LOGIK
+# 4. TICKER-DATA-MAPPING (DYNAMISCH ODER REPRÄSENTATIV)
 # ==============================================================================
 if st.button("🚀 Scan Starten"):
     
-    with st.spinner("Hole aktuelle Aktienliste von Wikipedia..."):
+    with st.spinner("Hole aktuelle Aktienliste..."):
         try:
+            # USA & Welt
             if "S&P 500" in markt:
-                url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-                table = get_wikipedia_table(url, 0)
-                tickers = table['Symbol'].tolist()
-                tickers = [t.replace('.', '-') for t in tickers]
-            elif "NASDAQ 100" in markt:
-                url = "https://en.wikipedia.org/wiki/Nasdaq-100"
-                table = get_wikipedia_table(url, 4)
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", 0)
+                tickers = [t.replace('.', '-') for t in table['Symbol'].tolist()]
+            elif "NASDAQ-100" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/Nasdaq-100", 4)
                 tickers = table['Ticker'].tolist()
-            elif "DAX" in markt:
-                url = "https://en.wikipedia.org/wiki/DAX"
-                table = get_wikipedia_table(url, 4)
+            elif "Dow Jones" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average", 1)
+                tickers = table['Symbol'].tolist()
+            elif "MSCI World" in markt:
+                tickers = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "LLY", "V", "MA", "ASML", "SAP", "MC.PA", "NESN.SW", "NOVN.SW", "7203.T", "AZN.L", "SHEL.L", "BHP"]
+            elif "NASDAQ Composite" in markt:
+                tickers = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "AVGO", "COST", "NFLX", "AMD", "QCOM", "INTC", "PANW", "TXN", "ISRG", "AMGN", "HON"]
+            elif "NYSE Composite" in markt:
+                tickers = ["TSM", "V", "MA", "UNH", "XOM", "JNJ", "WMT", "PG", "JPM", "ORCL", "LLY", "HD", "BAC", "ABV", "KO", "PFE", "DIS", "NKE"]
+            
+            # Europa
+            elif "EURO STOXX 50" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/Euro_Stoxx_50", 2)
                 tickers = table['Ticker'].tolist()
             elif "FTSE 100" in markt:
-                url = "https://en.wikipedia.org/wiki/FTSE_100_Index"
-                table = get_wikipedia_table(url, 4)
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/FTSE_100_Index", 4)
+                tickers = [t.replace('.', '-') + ".L" for t in table['Ticker'].tolist()]
+            elif "DAX 40" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/DAX", 4)
                 tickers = table['Ticker'].tolist()
-                tickers = [t + ".L" for t in tickers]
-            elif "All-World" in markt:
-                tickers = [
-                    "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "LLY", "V", "MA",
-                    "ASML", "MC.PA", "OR.PA", "SAP", "SIE.DE", "TTE", "NESN.SW", "NOVN.SW",
-                    "7203.T", "6758.T", "9984.T", "BABA", "TCEHY"
-                ]
+            elif "CAC 40" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/CAC_40", 4)
+                tickers = [t + ".PA" for t in table['Ticker'].tolist()]
+            elif "FTSE MIB" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/FTSE_MIB", 1)
+                tickers = [t + ".MI" for t in table['Ticker'].tolist()]
+            elif "IBEX 35" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/IBEX_35", 2)
+                tickers = [t + ".MC" for t in table['Ticker'].tolist()]
+            elif "SMI" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/Swiss_Market_Index", 3)
+                tickers = [t + ".SW" for t in table['Ticker'].tolist()]
+            elif "AEX-Index" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/AEX_Index", 2)
+                tickers = [t + ".AS" for t in table['Ticker'].tolist()]
+            
+            # Asien & Pazifik
+            elif "Nikkei 225" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/Nikkei_225", 1)
+                tickers = [str(t) + ".T" for t in table['Ticker'].tolist()]
+            elif "Shanghai Composite" in markt:
+                tickers = ["601398.SS", "601857.SS", "601288.SS", "601988.SS", "600519.SS", "600036.SS", "601318.SS", "601628.SS", "600019.SS", "601088.SS"]
+            elif "Hang Seng" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/Hang_Seng_Index", 6)
+                tickers = [t.strip().zfill(4) + ".HK" for t in table['Ticker'].tolist() if t]
+            elif "NIFTY 50" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/NIFTY_50", 2)
+                tickers = [t + ".NS" for t in table['Symbol'].tolist()]
+            elif "TOPIX" in markt:
+                tickers = ["7203.T", "6758.T", "9984.T", "8306.T", "6861.T", "4502.T", "8031.T", "6501.T", "4063.T", "6954.T"]
+            elif "S&P/ASX 200" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/S%26P/ASX_200", 2)
+                tickers = [t + ".AX" for t in table['Code'].tolist()]
+                
         except Exception as e:
-            st.error(f"Fehler beim Laden der Index-Liste: {e}")
+            st.error(f"Fehler beim Auflösen der Index-Liste: {e}")
             tickers = []
 
+    # ==============================================================================
+    # 5. BRANCHENFILTER & ANALYSE
+    # ==============================================================================
     if tickers:
-        st.info("Basis-Index geladen. Filtere Branchen Sektoren...")
+        st.info(f"Index geladen ({len(tickers)} Aktien im Pool). Filtere nach Sektoren...")
         progress_bar = st.progress(0)
         found_counter = 0
         filtered_tickers = []
         
-        # Branchen-Vorauswahl treffen
-        with st.spinner("Filtere nach Branche..."):
+        with st.spinner("Prüfe Branchenzugehörigkeit..."):
             for ticker in tickers:
                 if branchen_filter := sektor_mapping.get(branche):
                     try:
                         t_info = yf.Ticker(ticker).info
                         t_sector = t_info.get("sector", "")
-                        t_industry = t_info.get("industry", "")
                         
-                        if branchen_filter == ["Semiconductors"]:
-                            if "Semiconductor" in t_industry:
-                                filtered_tickers.append(ticker)
-                        elif t_sector in branchen_filter:
+                        if t_sector in branchen_filter:
                             filtered_tickers.append(ticker)
                     except:
                         continue
@@ -152,74 +210,33 @@ if st.button("🚀 Scan Starten"):
                     filtered_tickers = tickers
                     break
 
-        # Technische Analyse für die gefilterten Ticker starten
         if not filtered_tickers:
-            st.warning("Keine Aktien für die gewählte Kombination gefunden.")
+            st.warning("Keine Aktien für diese Kombination gefunden.")
         else:
-            st.info(f"Starte technischen Live-Scan für {len(filtered_tickers)} Aktien...")
+            st.info(f"Starte technischen Live-Scan für {len(filtered_tickers)} Werte...")
             
             for index, ticker in enumerate(filtered_tickers):
                 progress_bar.progress((index + 1) / len(filtered_tickers))
                 
                 try:
-                    # Daten für 3 Monate ziehen
                     df = yf.download(ticker, period="3mo", interval="1d", progress=False)
                     if df.empty or len(df) < 30: 
                         continue
                     
-                    # Indikatoren berechnen
                     df['RSI'] = calculate_rsi(df['Close'], period=14)
                     df['MACD'], df['MACD_Signal'] = calculate_macd(df['Close'])
                     
                     last = df.iloc[-1]
                     avg_vol = df['Volume'].tail(15).mean()
                     
-                    # Deine Strategie-Bedingungen
-                    rsi_ok = 45 <= last['RSI'] <= 66
+                    # Deine Strategie-Kriterien
+                    rsi_ok = 55 <= last['RSI'] <= 65
                     macd_ok = last['MACD'] > last['MACD_Signal']
-                    vol_ok = last['Volume'] > (avg_vol * 0.8) 
+                    vol_ok = last['Volume'] > (avg_vol * 1.3)
                     
                     if rsi_ok and macd_ok and vol_ok:
                         found_counter += 1
-                        st.success(f"🎯 Treffer #{found_counter} ({branche}): **{ticker}** erfüllt alle Kriterien!")
+                        st.success(f"🎯 Treffer #{found_counter} ({branche}): **{ticker}**")
                         
-                        # Gemini Prompt erstellen & senden
-                        prompt = (f"Aktie {ticker} aus der Branche {branche}: "
-                                  f"RSI ist {last['RSI']:.1f}, Volumen liegt bei {last['Volume']/avg_vol:.1f}x des Durchschnitts. "
-                                  f"Gib eine extrem kurze, professionelle Trading-Einschätzung (max. 2 Sätze).")
-                        
-                        response = model.generate_content(prompt)
-                        st.info(f"**Gemini-Analyse:** {response.text}")
-                        
-                        # Ausklappbares Fenster für die Charts
-                        with st.expander(f"📊 Technische Charts für {ticker} anzeigen"):
-                            
-                            # RSI Chart
-                            fig_rsi = gr.Figure()
-                            fig_rsi.add_trace(gr.Scatter(x=df.index, y=df['RSI'], mode='lines', name='RSI (14)', line=dict(color='purple')))
-                            fig_rsi.add_hline(y=65, line_dash="dash", line_color="green", annotation_text="Strategie Max (65)")
-                            fig_rsi.add_hline(y=55, line_dash="dash", line_color="orange", annotation_text="Strategie Min (55)")
-                            fig_rsi.add_hline(y=70, line_dash="dot", line_color="red")
-                            fig_rsi.add_hline(y=30, line_dash="dot", line_color="blue")
-                            fig_rsi.update_layout(title=f"RSI (Aktueller Wert: {last['RSI']:.1f})", yaxis=dict(range=[10, 90]), height=250, margin=dict(l=20, r=20, t=40, b=20))
-                            st.plotly_chart(fig_rsi, use_container_width=True)
-                            
-                            # MACD Chart
-                            fig_macd = gr.Figure()
-                            fig_macd.add_trace(gr.Scatter(x=df.index, y=df['MACD'], mode='lines', name='MACD', line=dict(color='blue')))
-                            fig_macd.add_trace(gr.Scatter(x=df.index, y=df['MACD_Signal'], mode='lines', name='Signal', line=dict(color='orange')))
-                            df['Histogramm'] = df['MACD'] - df['MACD_Signal']
-                            fig_macd.add_trace(gr.Bar(x=df.index, y=df['Histogramm'], name='Histogramm', marker_color='gray', opacity=0.4))
-                            fig_macd.update_layout(title="MACD Indikator (Bullish Crossover)", height=250, margin=dict(l=20, r=20, t=40, b=20))
-                            st.plotly_chart(fig_macd, use_container_width=True)
-                        
-                        st.divider()
-                        
-                except Exception:
-                    continue
-                    
-            if found_counter == 0:
-                st.warning("Muster-Scan beendet. Aktuell erfüllt keine Aktie dieses spezifische Profil.")
-            else:
-                st.balloons()
-                st.success(f"Scan abgeschlossen! {found_counter} Setups gefunden.")
+                        # Gemini Prompt & Auswertung
+                        prompt =
