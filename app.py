@@ -2,6 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import os
+import urllib.request
 import google.generativeai as genai
 
 # Gemini API konfigurieren
@@ -10,7 +11,7 @@ if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
     model = genai.GenerativeModel('gemini-1.5-flash')
 else:
-    st.error("Bitte hinterlege den GEMINI_API_KEY in den Hugging Face / Streamlit Secrets!")
+    st.error("Bitte hinterlege den GEMINI_API_KEY in den Streamlit Secrets!")
 
 # Mathematische Funktionen als Ersatz für pandas_ta
 def calculate_rsi(series, period=14):
@@ -26,6 +27,18 @@ def calculate_macd(series, slow=26, fast=12, signal=9):
     macd_line = exp1 - exp2
     signal_line = macd_line.ewm(span=signal, adjust=False).mean()
     return macd_line, signal_line
+
+# Hilfsfunktion, um Wikipedia-Listen trotz Bot-Schutz (403 Error) zu laden
+def get_wikipedia_table(url, match_index=0):
+    # Wir tarnen uns als normaler Google Chrome Browser
+    req = urllib.request.Request(
+        url, 
+        headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+    )
+    with urllib.request.urlopen(req) as response:
+        html = response.read()
+    tables = pd.read_html(html)
+    return tables[match_index]
 
 st.title("🤖 KI-Markt- & Branchen-Scanner")
 st.write("Wähle Index und Branche. Der Agent filtert den Markt nach deiner RSI-MACD-Volumen-Strategie.")
@@ -76,21 +89,21 @@ if st.button("🚀 Scan Starten"):
         try:
             if "S&P 500" in markt:
                 url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-                table = pd.read_html(url)
-                tickers = table[0]['Symbol'].tolist()
+                table = get_wikipedia_table(url, 0)
+                tickers = table['Symbol'].tolist()
                 tickers = [t.replace('.', '-') for t in tickers]
             elif "NASDAQ 100" in markt:
                 url = "https://en.wikipedia.org/wiki/Nasdaq-100"
-                table = pd.read_html(url)
-                tickers = table[4]['Ticker'].tolist()
+                table = get_wikipedia_table(url, 4)
+                tickers = table['Ticker'].tolist()
             elif "DAX" in markt:
                 url = "https://en.wikipedia.org/wiki/DAX"
-                table = pd.read_html(url)
-                tickers = table[4]['Ticker'].tolist()
+                table = get_wikipedia_table(url, 4)
+                tickers = table['Ticker'].tolist()
             elif "FTSE 100" in markt:
                 url = "https://en.wikipedia.org/wiki/FTSE_100_Index"
-                table = pd.read_html(url)
-                tickers = table[4]['Ticker'].tolist()
+                table = get_wikipedia_table(url, 4)
+                tickers = table['Ticker'].tolist()
                 tickers = [t + ".L" for t in tickers]
             elif "All-World" in markt:
                 tickers = [
@@ -136,18 +149,15 @@ if st.button("🚀 Scan Starten"):
                 progress_bar.progress((index + 1) / len(filtered_tickers))
                 
                 try:
-                    # Wir laden 3 Monate, damit der gleitende Durchschnitt für den RSI stabil berechnet werden kann
                     df = yf.download(ticker, period="3mo", interval="1d", progress=False)
                     if df.empty or len(df) < 30: continue
                     
-                    # Eigene Berechnung der Indikatoren aufrufen
                     df['RSI'] = calculate_rsi(df['Close'], period=14)
                     df['MACD'], df['MACD_Signal'] = calculate_macd(df['Close'])
                     
                     last = df.iloc[-1]
                     avg_vol = df['Volume'].tail(15).mean()
                     
-                    # Deine Strategie-Kriterien
                     rsi_ok = 55 <= last['RSI'] <= 65
                     macd_ok = last['MACD'] > last['MACD_Signal']
                     vol_ok = last['Volume'] > (avg_vol * 1.3)
