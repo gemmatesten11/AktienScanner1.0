@@ -1,3 +1,10 @@
+Das ist der berüchtigte IndentationError von Python. Er bedeutet, dass die Einrückung (die Tabulatoren oder Leerzeichen am Zeilenanfang) in diesem Block durcheinandergeraten ist.
+
+Wenn man Code aus dem Browser kopiert, mischt sich oft ein Mix aus echten Tabs und 4er-Leerzeichen (oder unsichtbaren Steuerzeichen) unter. Python reagiert darauf extrem allergisch, besonders bei with- oder for-Schleifen.
+
+Hier ist der komplette Code absolut sauber mit standardisierten 4er-Leerzeichen eingerückt. Kopiere ihn am besten komplett, um die fehlerhaften unsichtbaren Zeichen in deiner Datei zu überschreiben:
+Python
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -62,7 +69,7 @@ def calculate_bollinger(series):
     return (sma + (2 * std)), sma, (sma - (2 * std))
 
 # ==============================================================================
-# MARKT-POOLS (STATISCH GEGEN PARSING-FEHLER)
+# MARKT-POOLS
 # ==============================================================================
 def fetch_market_data(markt):
     pools = {
@@ -192,7 +199,6 @@ if st.button("🚀 High-Speed Scan Starten", use_container_width=True, type="pri
     m_data = fetch_market_data(markt)
     tickers = [item['ticker'] for item in m_data]
     
-    # Zeile 113 repariert und extrem kurz gehalten:
     t_names = {}
     for item in m_data:
         t_names[item['ticker']] = item['name']
@@ -231,3 +237,17 @@ if st.session_state.scanned:
         cols = st.columns(3)
         for idx, item in enumerate(st.session_state.results):
             with cols[idx % 3]:
+                r = item['rsi']
+                cl = "rsi-low" if r < 30 else ("rsi-high" if r > 70 else "rsi-mid")
+                st.markdown(f"""
+                    <div class="stock-card">
+                        <span class="rsi-badge {cl}">RSI: {r:.1f}</span>
+                        <div style="font-weight:700;">{item['name']}</div>
+                        <div style="color:#64748b; font-size:0.8rem;">{item['ticker']}</div>
+                    </div>
+                """, unsafe_allow_html=True)
+                if st.button("Analyse", key=f"b_{item['ticker']}_{idx}", use_container_width=True):
+                    show_details_popup(item["ticker"], item["name"])
+                st.write("")
+    else:
+        st.warning("Keine Treffer im ausgewählten RSI-Bereich.")
