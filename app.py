@@ -30,11 +30,15 @@ if "has_scanned" not in st.session_state:
     st.session_state.has_scanned = False
 
 # ==============================================================================
-# 2. SEITENLEISTE (RSI SCHIEBEREGLER)
+# 2. SEITENLEISTE (RSI SCHIEBEREGLER & GOLDEN CROSS)
 # ==============================================================================
 st.sidebar.header("⚡ RSI-Filter")
 rsi_min = st.sidebar.slider("Minimaler RSI-Wert", 0, 100, 20, step=1)
 rsi_max = st.sidebar.slider("Maximaler RSI-Wert", 0, 100, 40, step=1)
+
+st.sidebar.write("---")
+st.sidebar.header("📈 Chart-Signale")
+golden_cross_active = st.sidebar.toggle("Nur mit Golden Cross (letzte 5 Tage)", value=False)
 
 # ==============================================================================
 # 3. SCHNELLES POP-UP (NUR REINER RSI VERLAUF)
@@ -65,7 +69,7 @@ def show_details_popup(ticker):
 # 4. HAUPTANSICHT: AUSWAHL
 # ==============================================================================
 st.title("⚡ Ultra-Schneller Globaler RSI-Scanner")
-st.write("Durchsuche die wichtigsten Indizes der Welt in Sekundenschnelle rein nach RSI-Grenzen.")
+st.write("Durchsuche die wichtigsten Indizes der Welt in Sekundenschnelle nach RSI-Grenzen und Chartsignalen.")
 
 markt = st.selectbox(
     "1. Welchen Markt / Index möchtest du scannen?",
@@ -127,28 +131,50 @@ if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
             tickers = []
 
     if tickers:
-        # Performance-Sicherheitsschranke: Große Indizes für ungedrosselte Geschwindigkeit kappen
+        # Performance-Sicherheitsschranke
         if len(tickers) > 60:
             tickers = tickers[:60]
 
         with st.spinner(f"Scanne {len(tickers)} Aktien parallel..."):
             try:
-                # Schneller Batch-Download (nur 1 Monat nötig für den aktuellen RSI14)
-                data = yf.download(tickers, period="1mo", interval="1d", group_by='ticker', progress=False)
+                # Zeitspanne anpassen: Für SMA200 brauchen wir mindestens 1 Jahr Daten history
+                download_period = "1y" if golden_cross_active else "1mo"
+                data = yf.download(tickers, period=download_period, interval="1d", group_by='ticker', progress=False)
                 
                 for ticker in tickers:
-                    df = data[ticker].dropna() if len(tickers) > 1 else data.copy()
-                    if df.empty or len(df) < 15: continue
+                    df = data[ticker].dropna(subset=['Close']) if len(tickers) > 1 else data.copy().dropna(subset=['Close'])
+                    if df.empty or len(df) < 15: 
+                        continue
                     
+                    # 1. RSI berechnen & prüfen
                     df['RSI'] = calculate_rsi(df['Close'], period=14)
                     rsi_aktuell = df['RSI'].iloc[-1]
                     
-                    # Schneller numerischer Filter-Abgleich
-                    if rsi_min <= rsi_aktuell <= rsi_max:
-                        st.session_state.scan_results.append({
-                            "ticker": ticker,
-                            "rsi": f"{rsi_aktuell:.2f}"
-                        })
+                    if not (rsi_min <= rsi_aktuell <= rsi_max):
+                        continue
+                    
+                    # 2. Optional: Golden Cross Logik prüfen
+                    if golden_cross_active:
+                        if len(df) < 200: # Abbrechen, falls nicht genug Historie für SMA200 da ist
+                            continue
+                        
+                        df['SMA50'] = df['Close'].rolling(window=50).mean()
+                        df['SMA200'] = df['Close'].rolling(window=200).mean()
+                        
+                        # Bestimmen, wo SMA50 über SMA200 liegt
+                        df['Above'] = df['SMA50'] > df['SMA200']
+                        # Ein echter Crossover findet statt, wenn es heute True ist, aber gestern False war
+                        df['Crossover'] = df['Above'] & (~df['Above'].shift(1).fillna(True))
+                        
+                        # Prüfen, ob in den letzten 5 Handelstagen ein Crossover stattfand
+                        if not df['Crossover'].tail(5).any():
+                            continue
+                    
+                    # Wenn alle aktiven Filter bestanden wurden:
+                    st.session_state.scan_results.append({
+                        "ticker": ticker,
+                        "rsi": f"{rsi_aktuell:.2f}"
+                    })
             except Exception as e:
                 st.error(f"Fehler beim Daten-Download: {e}")
 
@@ -158,7 +184,7 @@ if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
 if st.session_state.has_scanned:
     st.write("---")
     if st.session_state.scan_results:
-        st.write(f"### 🎯 Treffer im gewählten RSI-Bereich ({len(st.session_state.scan_results)})")
+        st.write(f"### 🎯 Treffer im gewählten Bereich ({len(st.session_state.scan_results)})")
         
         # Grid-Layout für extrem schnelle, kompakte Ansicht ohne Scroll-Wege
         cols = st.columns(3)
@@ -171,4 +197,4 @@ if st.session_state.has_scanned:
                     if st.button("📊 RSI-Verlauf", key=f"btn_{item['ticker']}_{idx}"):
                         show_details_popup(item["ticker"])
     else:
-        st.warning("Keine Aktien im gewählten RSI-Bereich gefunden. Ändere die Schieberegler in der linken Seitenleiste.")
+        st.warning("Keine Aktien mit den gewählten Kriterien gefunden. Passe die Filter in der linken Seitenleiste an.")
