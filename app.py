@@ -175,4 +175,17 @@ markt = st.selectbox(
 
 branche = st.selectbox(
     "2. Welche Branche möchtest du filtern?",
-    ("Alle Branchen", "Grundindustrie (Rohstoffe, Bauwesen,
+    (
+        "Alle Branchen",
+        "Grundindustrie (Rohstoffe, Bauwesen, Bergbau, Metalle, Öl & Gas, Chemie)",
+        "Industriegüter & Dienstleistungen (Maschinen, Transport, Elektro, Luftfahrt)",
+        "Konsumgüter (Automobil, Lebensmittel, Getränke, Haushaltsartikel)",
+        "Verbraucherdienste (Medien, Tourismus, Einzelhandel, Freizeit)",
+        "Gesundheitswesen (Pharma, Biotechnologie, med. Geräte)",
+        "Versorger (Energie- und Versorgungssektor)",
+        "Finanzwesen (Banken und Finanzdienstleister)",
+        "Versicherungen",
+        "Immobilien (Immobilieninvestmentgesellschaften, REITs)",
+        "Technologie"
+    )
+)
