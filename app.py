@@ -1,10 +1,3 @@
-Das ist der berüchtigte IndentationError von Python. Er bedeutet, dass die Einrückung (die Tabulatoren oder Leerzeichen am Zeilenanfang) in diesem Block durcheinandergeraten ist.
-
-Wenn man Code aus dem Browser kopiert, mischt sich oft ein Mix aus echten Tabs und 4er-Leerzeichen (oder unsichtbaren Steuerzeichen) unter. Python reagiert darauf extrem allergisch, besonders bei with- oder for-Schleifen.
-
-Hier ist der komplette Code absolut sauber mit standardisierten 4er-Leerzeichen eingerückt. Kopiere ihn am besten komplett, um die fehlerhaften unsichtbaren Zeichen in deiner Datei zu überschreiben:
-Python
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
