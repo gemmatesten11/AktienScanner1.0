@@ -5,7 +5,7 @@ import urllib.request
 from io import StringIO
 import plotly.graph_objects as gr
 from plotly.subplots import make_subplots
-import random  # Neu importiert für die zufällige Aktienauswahl
+import random
 
 # Streamlit Page Config
 st.set_page_config(layout="wide", page_title="Schneller RSI-Scanner", page_icon="⚡")
@@ -15,15 +15,10 @@ st.set_page_config(layout="wide", page_title="Schneller RSI-Scanner", page_icon=
 # ==============================================================================
 def calculate_rsi(series, period=14):
     delta = series.diff()
-    
-    # Gewinne und Verluste trennen
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
-    
-    # Wilder's Smoothing via Exponential Moving Average (EMA) mit alpha = 1/period
     avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
-    
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
@@ -47,7 +42,7 @@ rsi_max = st.sidebar.slider("Maximaler RSI-Wert", 0, 100, 40, step=1)
 
 st.sidebar.write("---")
 st.sidebar.header("📈 Chart-Signale")
-golden_cross_active = st.sidebar.toggle("Nur mit Golden Cross (letzte 5 Tage)", value=False)
+golden_cross_active = st.sidebar.toggle("Nur mit Golden Cross (letzte 14 Tage)", value=False)
 
 # ==============================================================================
 # 3. POP-UP (DETAILS & SIGNAL-AMPEL)
@@ -62,31 +57,46 @@ def show_details_popup(ticker):
             except Exception:
                 company_name = ticker
             
+            # ISIN holen (Yahoo Finance liefert ISIN statt WKN)
+            try:
+                isin = stock.get_isin()
+                if not isin or isin == '-':
+                    isin = "Nicht verfügbar"
+            except Exception:
+                isin = "Nicht verfügbar"
+                
             st.write(f"## {company_name} (`{ticker}`)")
+            st.write(f"**Identifikation:** ISIN/WKN: `{isin}`")
             
-            # Immer 1 Jahr laden, um stabilen SMA200 und exakten RSI zu garantieren
+            # TradingView-Link generieren (Clean Ticker ohne Suffixe wie .DE oder .L für US/DE Aktien)
+            tv_ticker = ticker.split('.')[0]
+            tradingview_url = f"https://www.tradingview.com/symbols/{tv_ticker}/"
+            st.markdown(f"[➡️ **Auf TradingView analysieren**]({tradingview_url})")
+            st.write("") # Abstandhalter
+            
             df = stock.history(period="1y", interval="1d")
             df['RSI'] = calculate_rsi(df['Close'], period=14)
             
             df['SMA50'] = df['Close'].rolling(window=50).mean()
             df['SMA200'] = df['Close'].rolling(window=200).mean()
             
+            # Exakte Crossover-Logik
             df['Above'] = df['SMA50'] > df['SMA200']
             df['Crossover'] = df['Above'] & (~df['Above'].shift(1).fillna(True))
-            recent_golden_cross = df['Crossover'].tail(5).any()
+            recent_golden_cross = df['Crossover'].tail(14).any()
             
             rsi_aktuell = df['RSI'].iloc[-1]
             df_last30 = df.tail(30)
             
             if rsi_aktuell < 30 or recent_golden_cross:
                 ampel_signal = "🟢 KAUFEN (Buy)"
-                grund = "Der RSI ist überverkauft (< 30) oder es gab ein frisches Golden Cross (letzte 5 Tage)."
+                grund = "Der RSI ist überverkauft (< 30) oder es gab ein frisches Golden Cross in den letzten 14 Tagen."
             elif rsi_aktuell > 70:
                 ampel_signal = "🔴 VERKAUFEN (Sell)"
                 grund = "Der RSI ist überkauft (> 70). Korrekturrisiko erhöht."
             else:
                 ampel_signal = "🟡 HALTEN (Hold)"
-                grund = "RSI ist im neutralen Bereich und kein akutes Ausbruchsignal vorhanden."
+                grund = "RSI ist im neutralen Bereich und kein akutes Ausbruchsignal aus den letzten 14 Tagen vorhanden."
             
             col1, col2 = st.columns(2)
             with col1:
@@ -163,18 +173,22 @@ if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
             tickers = []
 
     if tickers:
-        # HIER IST DIE GEÄNDERTE LOGIK: Zufällige Ziehung statt hartem Abschneiden von vorne
         if len(tickers) > 60:
             tickers = random.sample(tickers, 60)
 
         with st.spinner(f"Scanne {len(tickers)} Aktien zufällig verteilt parallel..."):
             try:
-                # 3 Monate Mindesthistorie für die korrekte mathematische RSI-Berechnung
                 download_period = "1y" if golden_cross_active else "3mo"
                 data = yf.download(tickers, period=download_period, interval="1d", group_by='ticker', progress=False)
                 
                 for ticker in tickers:
-                    df = data[ticker].dropna(subset=['Close']) if len(tickers) > 1 else data.copy().dropna(subset=['Close'])
+                    if len(tickers) > 1:
+                        if ticker not in data.columns.levels[0]: 
+                            continue
+                        df = data[ticker].dropna(subset=['Close'])
+                    else:
+                        df = data.copy().dropna(subset=['Close'])
+                        
                     if df.empty or len(df) < 15: 
                         continue
                     
@@ -185,14 +199,15 @@ if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
                         continue
                     
                     if golden_cross_active:
-                        if len(df) < 200:
+                        if len(df) < 200: 
                             continue
                         df['SMA50'] = df['Close'].rolling(window=50).mean()
                         df['SMA200'] = df['Close'].rolling(window=200).mean()
+                        
                         df['Above'] = df['SMA50'] > df['SMA200']
                         df['Crossover'] = df['Above'] & (~df['Above'].shift(1).fillna(True))
                         
-                        if not df['Crossover'].tail(5).any():
+                        if not df['Crossover'].tail(14).any():
                             continue
                     
                     st.session_state.scan_results.append({
