@@ -5,6 +5,7 @@ import urllib.request
 from io import StringIO
 import plotly.graph_objects as gr
 from plotly.subplots import make_subplots
+import random  # Neu importiert für die zufällige Aktienauswahl
 
 # Streamlit Page Config
 st.set_page_config(layout="wide", page_title="Schneller RSI-Scanner", page_icon="⚡")
@@ -49,7 +50,7 @@ st.sidebar.header("📈 Chart-Signale")
 golden_cross_active = st.sidebar.toggle("Nur mit Golden Cross (letzte 5 Tage)", value=False)
 
 # ==============================================================================
-# 3. POP-UP
+# 3. POP-UP (DETAILS & SIGNAL-AMPEL)
 # ==============================================================================
 @st.dialog("📊 Aktien-Details & Signal", width="large")
 def show_details_popup(ticker):
@@ -162,12 +163,13 @@ if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
             tickers = []
 
     if tickers:
+        # HIER IST DIE GEÄNDERTE LOGIK: Zufällige Ziehung statt hartem Abschneiden von vorne
         if len(tickers) > 60:
-            tickers = tickers[:60]
+            tickers = random.sample(tickers, 60)
 
-        with st.spinner(f"Scanne {len(tickers)} Aktien parallel..."):
+        with st.spinner(f"Scanne {len(tickers)} Aktien zufällig verteilt parallel..."):
             try:
-                # WICHTIG: Mindestens 3 Monate ("3mo") für korrekte RSI-Einschwingzeit laden!
+                # 3 Monate Mindesthistorie für die korrekte mathematische RSI-Berechnung
                 download_period = "1y" if golden_cross_active else "3mo"
                 data = yf.download(tickers, period=download_period, interval="1d", group_by='ticker', progress=False)
                 
@@ -217,4 +219,4 @@ if st.session_state.has_scanned:
                     if st.button("📊 Analysieren", key=f"btn_{item['ticker']}_{idx}"):
                         show_details_popup(item["ticker"])
     else:
-        st.warning("Keine Aktien mit den gewählten Kriterien gefunden.")
+        st.warning("Keine Aktien mit den gewählten Kriterien gefunden. Klicke einfach nochmal auf Scannen für 60 andere Zufallsaktien.")
