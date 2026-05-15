@@ -177,5 +177,15 @@ def fetch_market_data(markt):
         st.error(f"Fehler beim Live-Scraping von {markt}: {e}")
     
     if "DAX 40" in markt:
-        return [{"ticker": "ADS.DE", "name": "Adidas"}, {"ticker": "ALV.DE", "name": "Allianz"}, {"ticker": "BAS.DE", "name": "BASF"}, {"ticker": "BAYN.DE", "name": "Bayer"}, {"ticker": "BMW.DE", "name": "BMW"}, {"ticker": "DBK.DE", "name": "Deutsche Bank"}, {"ticker": "DTE.DE", "name": "Deutsche Telekom"}, {"ticker": "SAP.DE", "name": "SAP"}, {"ticker": "SIE.DE", "name": "Siemens"}]
+        return [
+            {"ticker": "ADS.DE", "name": "Adidas"}, 
+            {"ticker": "ALV.DE", "name": "Allianz"}, 
+            {"ticker": "BAS.DE", "name": "BASF"}, 
+            {"ticker": "BAYN.DE", "name": "Bayer"}, 
+            {"ticker": "BMW.DE", "name": "BMW"}, 
+            {"ticker": "DBK.DE", "name": "Deutsche Bank"}, 
+            {"ticker": "DTE.DE", "name": "Deutsche Telekom"}, 
+            {"ticker": "SAP.DE", "name": "SAP"}, 
+            {"ticker": "SIE.DE", "name": "Siemens"}
+        ]
     return []
