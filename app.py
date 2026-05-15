@@ -8,7 +8,7 @@ import plotly.graph_objects as gr
 from io import StringIO
 
 # ==============================================================================
-# 1. API-KONFIGURATION
+# 1. API-KONFIGURATION & STATE
 # ==============================================================================
 GOOGLE_API_KEY = os.environ.get("GEMINI_API_KEY")
 if GOOGLE_API_KEY:
@@ -16,6 +16,10 @@ if GOOGLE_API_KEY:
     model = genai.GenerativeModel('gemini-1.5-flash')
 else:
     st.error("Bitte hinterlege den GEMINI_API_KEY in den Streamlit Cloud Secrets!")
+
+# Session State für die Detailansicht initialisieren
+if "detail_ticker" not in st.session_state:
+    st.session_state.detail_ticker = None
 
 # ==============================================================================
 # 2. MATHEMATISCHE HILFSFUNKTIONEN
@@ -44,9 +48,127 @@ def get_wikipedia_table(url, match_index=0):
     return pd.read_html(StringIO(html_text))[match_index]
 
 # ==============================================================================
-# 3. BENUTZEROBERFLÄCHE (STREAMLIT)
+# 3. SEITE 2: DETAILANSICHT (FINANZ-COCKPIT)
 # ==============================================================================
-st.title("🤖 KI-Markt- & Branchen-Scanner v2.4")
+if st.session_state.detail_ticker:
+    ticker = st.session_state.detail_ticker
+    
+    if st.button("⬅️ Zurück zum Scanner"):
+        st.session_state.detail_ticker = None
+        st.rerun()
+        
+    st.title(f"📊 Finanz-Cockpit & Details: {ticker}")
+    st.divider()
+    
+    with st.spinner(f"Lade tiefgehende Finanzdetails für {ticker}..."):
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            df = stock.history(period="6mo", interval="1d")
+            
+            df['RSI'] = calculate_rsi(df['Close'], period=14)
+            df['MACD'], df['MACD_Signal'] = calculate_macd(df['Close'])
+            last = df.iloc[-1]
+            
+            # Stammdaten abrufen
+            isin = info.get("isin", "Nicht verfügbar")
+            # Yahoo bietet WKN selten nativ, wir nutzen ein übliches Fallback über die Beschreibung oder lassen es sauber gecentered
+            wkn = info.get("wkn", "Siehe ISIN") 
+            name = info.get("longName", ticker)
+            
+            # Spalten-Layout für Stammdaten
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Unternehmen", name)
+            col2.metric("Ticker", ticker)
+            col3.metric("ISIN", isin)
+            col4.metric("WKN / WSN", wkn)
+            
+            st.divider()
+            
+            # RECHNERISCHE AMPEL-LOGIK (Basierend auf RSI und MACD)
+            st.subheader("🚦 Technische Live-Ampel")
+            
+            rsi_val = last['RSI']
+            macd_trend = last['MACD'] > last['MACD_Signal']
+            
+            # Scoring-System für die Ampel
+            if rsi_val < 35 and macd_trend:
+                ampel_status = "KAUFEN (Stark überverkauft + Bullish Cross)"
+                ampel_color = "🟢"
+                ampel_md = "### 🟢 KAUFEN"
+            elif 35 <= rsi_val <= 65 and macd_trend:
+                ampel_status = "KAUFEN / AKKUMULIEREN (Gesunder Trend)"
+                ampel_color = "🟢"
+                ampel_md = "### 🟢 KAUFEN"
+            elif rsi_val > 70:
+                ampel_status = "VERKAUFEN (Stark überhitzt / Überkauft)"
+                ampel_color = "🔴"
+                ampel_md = "### 🔴 VERKAUFEN"
+            else:
+                ampel_status = "HALTEN (Neutraler Marktzustand)"
+                ampel_color = "🟡"
+                ampel_md = "### 🟡 HALTEN"
+                
+            st.info(f"**Empfehlung auf Basis der mathematischen Indikatoren:** {ampel_color} {ampel_status}")
+            
+            st.divider()
+            
+            # CHARTS GENERIEREN
+            st.subheader("📈 Technische Analyse & Charts")
+            
+            # 1. Live Candle Chart
+            fig_chart = gr.Figure()
+            fig_chart.add_trace(gr.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Kurs"))
+            fig_chart.update_layout(title="Live Candlestick Chart (6 Monate)", xaxis_rangeslider_visible=False, height=350)
+            st.plotly_chart(fig_chart, use_container_width=True)
+            
+            # 2. RSI Chart
+            fig_rsi = gr.Figure()
+            fig_rsi.add_trace(gr.Scatter(x=df.index, y=df['RSI'], mode='lines', name='RSI', line=dict(color='purple')))
+            fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Überkauft")
+            fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Überverkauft")
+            fig_rsi.update_layout(title=f"RSI14 Indikator (Aktuell: {rsi_val:.1f})", yaxis=dict(range=[10, 90]), height=220)
+            st.plotly_chart(fig_rsi, use_container_width=True)
+            
+            # 3. MACD Chart
+            fig_macd = gr.Figure()
+            fig_macd.add_trace(gr.Scatter(x=df.index, y=df['MACD'], mode='lines', name='MACD', line=dict(color='blue')))
+            fig_macd.add_trace(gr.Scatter(x=df.index, y=df['MACD_Signal'], mode='lines', name='Signal', line=dict(color='orange')))
+            df['Histo'] = df['MACD'] - df['MACD_Signal']
+            fig_macd.add_trace(gr.Bar(x=df.index, y=df['Histo'], name='Histogramm', opacity=0.3))
+            fig_macd.update_layout(title="MACD Momentum", height=220)
+            st.plotly_chart(fig_macd, use_container_width=True)
+            
+            st.divider()
+            
+            # ANALYSTEN TABELLE
+            st.subheader("👥 Analysten-Konsensus & Ratings")
+            
+            # Hole Empfehlungen falls bei Yahoo verfügbar
+            target_high = info.get("targetHighPrice", "N/A")
+            target_low = info.get("targetLowPrice", "N/A")
+            target_mean = info.get("targetMeanPrice", "N/A")
+            current_price = info.get("currentPrice", last['Close'])
+            recommendation = info.get("recommendationKey", "N/A").upper()
+            
+            # Generiere eine strukturierte Analysten-Übersicht
+            analysten_data = {
+                "Metrik": ["Aktueller Kurs", "Analysten-Ziel (Schnitt)", "Höchstes Kursziel", "Niedrigstes Kursziel", "Gesamturteil"],
+                "Wert": [f"{current_price} USD", f"{target_mean} USD", f"{target_high} USD", f"{target_low} USD", recommendation]
+            }
+            analysten_df = pd.DataFrame(analysten_data)
+            st.table(analysten_df)
+            
+        except Exception as e:
+            st.error(f"Fehler beim Laden der Finanzdetails: {e}")
+            
+    st.stop() # Stoppt hier, damit der normale Scanner im Detailmodus nicht gerendert wird
+
+
+# ==============================================================================
+# 4. SEITE 1: BRANCHEN- & MARKT-SCANNER (HAUPTANSICHT)
+# ==============================================================================
+st.title("🤖 KI-Markt- & Branchen-Scanner v2.5")
 st.write("Massen-Live-Scan mit Candlestick-Charts, RSI, MACD und KI-Analyse.")
 
 markt = st.selectbox(
@@ -75,7 +197,6 @@ markt = st.selectbox(
     )
 )
 
-# Deine neue Branchenstruktur
 branche = st.selectbox(
     "2. Welche Branche möchtest du filtern?",
     (
@@ -93,7 +214,6 @@ branche = st.selectbox(
     )
 )
 
-# Sektor-Mapping auf die Industriedaten von Yahoo Finance
 sektor_mapping = {
     "Grundindustrie (Rohstoffe, Bauwesen, Bergbau, Metalle, Öl & Gas, Chemie)": ["Basic Materials", "Energy"],
     "Industriegüter & Dienstleistungen (Maschinen, Transport, Elektro, Luftfahrt)": ["Industrials"],
@@ -102,7 +222,7 @@ sektor_mapping = {
     "Gesundheitswesen (Pharma, Biotechnologie, med. Geräte)": ["Healthcare"],
     "Versorger (Energie- und Versorgungssektor)": ["Utilities"],
     "Finanzwesen (Banken und Finanzdienstleister)": ["Financial Services"],
-    "Versicherungen": ["Financial Services"],  # Wird in der Schleife über industry verfeinert
+    "Versicherungen": ["Financial Services"],
     "Immobilien (Immobilieninvestmentgesellschaften, REITs)": ["Real Estate"],
     "Technologie": ["Technology", "Communication Services"]
 }
@@ -113,7 +233,7 @@ rsi_max = st.sidebar.slider("RSI Maximum", 50, 90, 70)
 vol_mult = st.sidebar.slider("Volumen-Faktor (x des Schnitts)", 0.5, 2.0, 1.0)
 
 # ==============================================================================
-# 4. TICKER LADEN
+# 5. DOWNLOAD & SCAN RUNNER
 # ==============================================================================
 if st.button("🚀 Scan Starten"):
     
@@ -148,9 +268,6 @@ if st.button("🚀 Scan Starten"):
             st.error(f"Fehler beim Laden des Index: {e}")
             tickers = []
 
-    # ==============================================================================
-    # 5. DOWNLOAD & ANALYSE
-    # ==============================================================================
     if tickers:
         if len(tickers) > 100:
             st.warning("Index sehr groß. Scanne die ersten 100 Werte für maximale Geschwindigkeit...")
@@ -182,20 +299,15 @@ if st.button("🚀 Scan Starten"):
                         if df.empty or len(df) < 25: 
                             continue
                         
-                        # Erweiterter Branchen- und Sektor-Filter
                         if "Alle Branchen" not in branche:
                             t_info = yf.Ticker(ticker).info
                             t_sector = t_info.get("sector", "")
                             t_industry = t_info.get("industry", "")
                             
-                            # Sonderlogik für Versicherungen vs. Banken
                             if branche == "Versicherungen":
-                                if "Insurance" not in t_industry:
-                                    continue
+                                if "Insurance" not in t_industry: continue
                             elif "Finanzwesen" in branche:
-                                if "Insurance" in t_industry or t_sector != "Financial Services":
-                                    continue
-                            # Standard-Sektorprüfung für restliche Branchen
+                                if "Insurance" in t_industry or t_sector != "Financial Services": continue
                             elif t_sector not in sektor_mapping.get(branche, []):
                                 continue
 
@@ -211,58 +323,29 @@ if st.button("🚀 Scan Starten"):
                         
                         if rsi_ok and macd_ok and vol_ok:
                             found_counter += 1
-                            st.success(f"🎯 Treffer #{found_counter}: **{ticker}**")
                             
-                            prompt = f"""
-                            Aktie {ticker}: RSI ist {last['RSI']:.1f}, 
-                            Volumen liegt bei {last['Volume']/avg_vol:.1f}x des Durchschnitts. 
-                            Gib eine extrem kurze, professionelle Trading-Einschätzung (max. 2 Sätze).
-                            """
-                            
-                            response = model.generate_content(prompt)
-                            st.info(f"**Gemini-Analyse:** {response.text}")
-                            
-                            with st.expander(f"📊 Technische Analyse & Charts für {ticker} öffnen"):
+                            # Layout-Box für jeden Treffer
+                            with st.container():
+                                st.success(f"🎯 Treffer #{found_counter}: **{ticker}**")
                                 
-                                fig_chart = gr.Figure()
-                                fig_chart.add_trace(gr.Candlestick(
-                                    x=df.index,
-                                    open=df['Open'],
-                                    high=df['High'],
-                                    low=df['Low'],
-                                    close=df['Close'],
-                                    name="Kurs"
-                                ))
-                                fig_chart.update_layout(
-                                    title=f"Aktueller Kursverlauf (Candlestick-Chart) - Letzter Schlusskurs: {last['Close']:.2f}",
-                                    xaxis_rangeslider_visible=False,
-                                    height=300,
-                                    margin=dict(l=20, r=20, t=40, b=20)
-                                )
-                                st.plotly_chart(fig_chart, use_container_width=True)
-                                
-                                fig_rsi = gr.Figure()
-                                fig_rsi.add_trace(gr.Scatter(x=df.index, y=df['RSI'], mode='lines', name='RSI', line=dict(color='purple')))
-                                fig_rsi.add_hline(y=rsi_max, line_dash="dash", line_color="green", annotation_text="Max")
-                                fig_rsi.add_hline(y=rsi_min, line_dash="dash", line_color="orange", annotation_text="Min")
-                                fig_rsi.update_layout(title=f"RSI14 (Aktuell: {last['RSI']:.1f})", yaxis=dict(range=[10, 90]), height=200, margin=dict(l=20, r=20, t=40, b=20))
-                                st.plotly_chart(fig_rsi, use_container_width=True)
-                                
-                                fig_macd = gr.Figure()
-                                fig_macd.add_trace(gr.Scatter(x=df.index, y=df['MACD'], mode='lines', name='MACD', line=dict(color='blue')))
-                                fig_macd.add_trace(gr.Scatter(x=df.index, y=df['MACD_Signal'], mode='lines', name='Signal', line=dict(color='orange')))
-                                df['Histogramm'] = df['MACD'] - df['MACD_Signal']
-                                fig_macd.add_trace(gr.Bar(x=df.index, y=df['Histogramm'], name='Histo', marker_color='gray', opacity=0.3))
-                                fig_macd.update_layout(title="MACD Crossover Setup", height=200, margin=dict(l=20, r=20, t=40, b=20))
-                                st.plotly_chart(fig_macd, use_container_width=True)
-                                
-                            st.divider()
+                                # BUTTON FÜR SEITE 2 (DETAILANSICHT)
+                                if st.button(f"🔍 Vollständige Finanzdetails für {ticker} anzeigen", key=f"btn_{ticker}"):
+                                    st.session_state.detail_ticker = ticker
+                                    st.rerun()
+                                    
+                                prompt = f"""
+                                Aktie {ticker}: RSI ist {last['RSI']:.1f}, 
+                                Volumen liegt bei {last['Volume']/avg_vol:.1f}x des Durchschnitts. 
+                                Gib eine extrem kurze, professionelle Trading-Einschätzung (max. 2 Sätze).
+                                """
+                                response = model.generate_content(prompt)
+                                st.info(f"**Gemini-Analyse:** {response.text}")
+                                st.divider()
                             
                     except:
                         continue
             
             if found_counter == 0:
-                st.warning("Scan beendet. Aktuell erfüllt kein Titel dieses Profil. Nutze die Schieberegler links, um die Kriterien zu lockern!")
+                st.warning("Scan beendet. Aktuell erfüllt kein Titel dieses Profil. Lockere die Kriterien in der Seitenleiste!")
             else:
                 st.balloons()
-                st.success(f"Scan abgeschlossen! {found_counter} Kauf-Setups gefunden.")
