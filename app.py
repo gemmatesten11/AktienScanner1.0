@@ -102,18 +102,10 @@ def calculate_bollinger_bands(series, period=20, num_std=2):
     return upper_band, sma, lower_band
 
 # ==============================================================================
-# 3. TICKER SCRAPER (BEREINIGT)
+# 3. TICKER SCRAPER (ROBUST & BEREINIGT)
 # ==============================================================================
 def fetch_market_data(markt):
     headers = {'User-Agent': 'Mozilla/5.0'}
     
     def extract_from_df(df, market_type):
-        cols_lower = [str(c).lower() for c in df.columns]
-        t_idx = -1
-        for idx, c in enumerate(cols_lower):
-            if any(k in c for k in ['symbol', 'kürzel', 'ticker', 'epic']):
-                t_idx = idx
-                break
-        n_idx = -1
-        for idx, c in enumerate(cols_lower):
-            if any(
+        cols_lower =
