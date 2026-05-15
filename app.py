@@ -34,7 +34,7 @@ def load_cached_isin(ticker):
         return "Nicht verfügbar"
 
 # ==============================================================================
-# TECHNISCHE INDIKATOREN (RSI & MACD)
+# TECHNISCHE INDIKATOREN (RSI, MACD & BOLLINGER BÄNDER)
 # ==============================================================================
 def calculate_rsi(series, period=14):
     delta = series.diff()
@@ -53,6 +53,13 @@ def calculate_macd(series, fast=12, slow=26, signal=9):
     macd_hist = macd - macd_signal
     macd_pct = (macd / ema_slow) * 100
     return macd, macd_signal, macd_hist, macd_pct
+
+def calculate_bollinger_bands(series, period=20, num_std=2):
+    sma = series.rolling(window=period).mean()
+    std = series.rolling(window=period).std()
+    upper_band = sma + (num_std * std)
+    lower_band = sma - (num_std * std)
+    return upper_band, sma, lower_band
 
 # ==============================================================================
 # INTELLIGENTER & DOPPELT GESICHERTER TICKER + NAMEN SCRAPER
@@ -188,7 +195,7 @@ st.sidebar.header("📈 Chart-Signale")
 golden_cross_active = st.sidebar.toggle("Nur mit Golden Cross (letzte 14 Tage)", value=False)
 
 # ==============================================================================
-# 3. POP-UP (AKTIENNAME PERFEKT GESICHERT)
+# 3. POP-UP (AKTIENNAME & BOLLINGER CHART INTEGRATION)
 # ==============================================================================
 @st.dialog("📊 Aktien-Details & Signal", width="large")
 def show_details_popup(ticker, company_name):
@@ -214,7 +221,6 @@ def show_details_popup(ticker, company_name):
             rsi_aktuell = df_base['RSI'].iloc[-1]
             macd_pct_aktuell = df_base['MACD_Pct'].iloc[-1]
             
-            # Der Name wird garantiert angezeigt, da er als Argument übergeben wurde!
             st.write(f"## {company_name} (`{ticker}`)")
             
             meta_col1, meta_col2, meta_col3, meta_col4 = st.columns(4)
@@ -258,20 +264,31 @@ def show_details_popup(ticker, company_name):
                     st.warning(f"Keine ausreichenden Intraday-Daten für {title_suffix} im Cache.")
                     return
                 
+                # Technische Indikatoren für das jeweilige Intervall berechnen
                 df_chart['RSI'] = calculate_rsi(df_chart['Close'], period=14)
                 df_chart['MACD'], df_chart['MACD_Signal'], df_chart['MACD_Hist'], _ = calculate_macd(df_chart['Close'])
+                df_chart['BB_Upper'], df_chart['BB_Middle'], df_chart['BB_Lower'] = calculate_bollinger_bands(df_chart['Close'])
                 
                 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.06, row_heights=[0.45, 0.25, 0.30])
                 
-                fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['Close'], mode='lines', name='Kurs', line=dict(color='#1f77b4', width=2)), row=1, col=1)
+                # --- ROW 1: KURS, SMAs & BOLLINGER BÄNDER ---
+                fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['Close'], mode='lines', name='Kurs', line=dict(color='#1f77b4', width=2.5)), row=1, col=1)
+                
                 if 'SMA50' in df_chart.columns:
                     fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['SMA50'], mode='lines', name='SMA 50', line=dict(color='orange', width=1.5)), row=1, col=1)
                     fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['SMA200'], mode='lines', name='SMA 200', line=dict(color='red', width=1.5)), row=1, col=1)
                 
+                # Bollinger Bänder (Subtil grau-gestrichelt eingezeichnet)
+                fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['BB_Upper'], mode='lines', name='BB Oben', line=dict(color='rgba(128, 128, 128, 0.5)', width=1.5, dash='dash')), row=1, col=1)
+                fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['BB_Middle'], mode='lines', name='BB Mitte (Basis)', line=dict(color='rgba(128, 128, 128, 0.3)', width=1, dash='dot')), row=1, col=1)
+                fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['BB_Lower'], mode='lines', name='BB Unten', line=dict(color='rgba(128, 128, 128, 0.5)', width=1.5, dash='dash')), row=1, col=1)
+                
+                # --- ROW 2: RSI ---
                 fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['RSI'], mode='lines', name='RSI 14', line=dict(color='purple', width=1.5)), row=2, col=1)
                 fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
                 fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
                 
+                # --- ROW 3: MACD ---
                 fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['MACD'], mode='lines', name='MACD', line=dict(color='blue', width=1.5)), row=3, col=1)
                 fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['MACD_Signal'], mode='lines', name='Signal (Geglättet)', line=dict(color='orange', width=1.5)), row=3, col=1)
                 fig.add_trace(gr.Bar(x=df_chart.index, y=df_chart['MACD_Hist'], name='Histogramm', marker_color='lightgray', opacity=0.7), row=3, col=1)
@@ -314,7 +331,7 @@ st.title("⚡ Ultra-Schneller Globaler RSI-Scanner")
 markt = st.selectbox("1. Welchen Markt / Index möchtest du scannen?", ("USA (S&P 500 Large Caps)", "USA (S&P 400 Mid Caps)", "USA (S&P 600 Small Caps)", "Deutschland (DAX 40 Large Caps)", "Deutschland (MDAX Mid Caps)", "Deutschland (SDAX Small Caps)", "Eurozone (EURO STOXX 50)", "Großbritannien (FTSE 100)", "Frankreich (CAC 40)", "Japan (Nikkei 225)"))
 
 # ==============================================================================
-# 5. HIGH-SPEED SCAN LOGIK WITH REINFORCED NAMES
+# 5. HIGH-SPEED SCAN LOGIK
 # ==============================================================================
 if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
     st.session_state.scan_results = []
@@ -363,7 +380,6 @@ if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
                         if not df['Crossover'].tail(14).any():
                             continue
                     
-                    # Hier speichern wir Ticker und den korrekten Namen ab
                     st.session_state.scan_results.append({
                         "ticker": ticker,
                         "name": ticker_to_name.get(ticker, ticker),
@@ -384,10 +400,8 @@ if st.session_state.has_scanned:
             col_target = cols[idx % 3]
             with col_target:
                 with st.container(border=True):
-                    # Anzeige des echten Namens bereits auf der Übersicht
                     st.write(f"**{item['name']}**")
                     st.caption(f"Ticker: `{item['ticker']}` | RSI: `{item['rsi']}`")
-                    # Der Name wird direkt in die Dialog-Funktion durchgereicht
                     if st.button("📊 Analysieren", key=f"btn_{item['ticker']}_{idx}"):
                         show_details_popup(item["ticker"], item["name"])
     else:
