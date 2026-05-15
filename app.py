@@ -137,4 +137,45 @@ def fetch_market_data(markt):
             for df in tables:
                 res = extract_from_df(df, "DAX")
                 if len(res) >= 30: return res
-        elif "MDAX
+        elif "MDAX" in markt:
+            req = urllib.request.Request("https://de.wikipedia.org/wiki/MDAX", headers=headers)
+            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
+            for df in tables:
+                res = extract_from_df(df, "MDAX")
+                if len(res) >= 30: return res
+        elif "SDAX" in markt:
+            req = urllib.request.Request("https://de.wikipedia.org/wiki/SDAX", headers=headers)
+            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
+            for df in tables:
+                res = extract_from_df(df, "SDAX")
+                if len(res) >= 30: return res
+        elif "EURO STOXX" in markt:
+            req = urllib.request.Request("https://en.wikipedia.org/wiki/Euro_Stoxx_50", headers=headers)
+            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
+            for df in tables:
+                res = extract_from_df(df, "EURO STOXX")
+                if len(res) >= 30: return res
+        elif "FTSE 100" in markt:
+            req = urllib.request.Request("https://en.wikipedia.org/wiki/FTSE_100_Index", headers=headers)
+            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
+            for df in tables:
+                res = extract_from_df(df, "FTSE 100")
+                if len(res) >= 50: return res
+        elif "CAC 40" in markt:
+            req = urllib.request.Request("https://en.wikipedia.org/wiki/CAC_40", headers=headers)
+            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
+            for df in tables:
+                res = extract_from_df(df, "CAC 40")
+                if len(res) >= 30: return res
+        elif "Nikkei 225" in markt:
+            req = urllib.request.Request("https://en.wikipedia.org/wiki/Nikkei_225", headers=headers)
+            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
+            for df in tables:
+                res = extract_from_df(df, "NIKKEI")
+                if len(res) >= 50: return res
+    except Exception as e:
+        st.error(f"Fehler beim Live-Scraping von {markt}: {e}")
+    
+    if "DAX 40" in markt:
+        return [{"ticker": "ADS.DE", "name": "Adidas"}, {"ticker": "ALV.DE", "name": "Allianz"}, {"ticker": "BAS.DE", "name": "BASF"}, {"ticker": "BAYN.DE", "name": "Bayer"}, {"ticker": "BMW.DE", "name": "BMW"}, {"ticker": "DBK.DE", "name": "Deutsche Bank"}, {"ticker": "DTE.DE", "name": "Deutsche Telekom"}, {"ticker": "SAP.DE", "name": "SAP"}, {"ticker": "SIE.DE", "name": "Siemens"}]
+    return []
