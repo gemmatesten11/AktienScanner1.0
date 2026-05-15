@@ -41,29 +41,71 @@ st.sidebar.header("📈 Chart-Signale")
 golden_cross_active = st.sidebar.toggle("Nur mit Golden Cross (letzte 5 Tage)", value=False)
 
 # ==============================================================================
-# 3. SCHNELLES POP-UP (NUR REINER RSI VERLAUF)
+# 3. POP-UP MIT AKTENNAMEN & SIGNAL-AMPEL
 # ==============================================================================
-@st.dialog("📊 RSI Detail-Verlauf", width="large")
+@st.dialog("📊 Aktien-Details & Signal", width="large")
 def show_details_popup(ticker):
-    st.write(f"### Letzte 30 Handelstage für: **{ticker}**")
-    with st.spinner("Lade Chart..."):
+    with st.spinner("Lade Daten und Firmenprofil..."):
         try:
             stock = yf.Ticker(ticker)
-            df = stock.history(period="3mo", interval="1d")
+            
+            # Sicheres Auslesen des echten Unternehmensnamens
+            try:
+                company_name = stock.info.get('longName', ticker)
+            except Exception:
+                company_name = ticker # Fallback falls API zickt
+            
+            st.write(f"## {company_name} (`{ticker}`)")
+            
+            # Daten für Indikatoren laden (1 Jahr wegen SMA200)
+            df = stock.history(period="1y", interval="1d")
             df['RSI'] = calculate_rsi(df['Close'], period=14)
+            
+            # Golden Cross für die Ampel berechnen
+            df['SMA50'] = df['Close'].rolling(window=50).mean()
+            df['SMA200'] = df['Close'].rolling(window=200).mean()
+            df['Above'] = df['SMA50'] > df['SMA200']
+            df['Crossover'] = df['Above'] & (~df['Above'].shift(1).fillna(True))
+            recent_golden_cross = df['Crossover'].tail(5).any()
+            
+            rsi_aktuell = df['RSI'].iloc[-1]
             df_last30 = df.tail(30)
+            
+            # --- AMPEL LOGIK ---
+            if rsi_aktuell < 30 or recent_golden_cross:
+                ampel_signal = "🟢 KAUFEN (Buy)"
+                ampel_color = "green"
+                grund = "Der RSI ist überverkauft (< 30) oder es gab ein Golden Cross in den letzten 5 Tagen."
+            elif rsi_aktuell > 70:
+                ampel_signal = "🔴 VERKAUFEN (Sell)"
+                ampel_color = "red"
+                grund = "Der RSI ist überkauft (> 70). Korrekturrisiko erhöht."
+            else:
+                ampel_signal = "🟡 HALTEN (Hold)"
+                ampel_color = "orange"
+                grund = "RSI ist im neutralen Bereich und kein aktives Ausbruchsignal vorhanden."
+            
+            # Spalten-Layout für die Ampel-Anzeige
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Aktueller RSI-Wert", f"{rsi_aktuell:.2f}")
+            with col2:
+                st.markdown(f"### Signal-Ampel: {ampel_signal}")
+                st.caption(f"**Grund:** {grund}")
+            
+            st.write("---")
+            st.write("### RSI-Verlauf (Letzte 30 Handelstage)")
             
             # RSI Chart
             fig = gr.Figure()
             fig.add_trace(gr.Scatter(x=df_last30.index, y=df_last30['RSI'], mode='lines+markers', name='RSI14', line=dict(color='purple', width=2)))
             fig.add_hline(y=70, line_dash="dash", line_color="red")
             fig.add_hline(y=30, line_dash="dash", line_color="green")
-            fig.update_layout(height=300, yaxis=dict(range=[0, 100]), margin=dict(l=10, r=10, t=10, b=10))
+            fig.update_layout(height=280, yaxis=dict(range=[0, 100]), margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(fig, use_container_width=True)
             
-            st.metric("Aktueller RSI-Wert", f"{df['RSI'].iloc[-1]:.2f}")
         except Exception as e:
-            st.error(f"Fehler: {e}")
+            st.error(f"Fehler beim Laden der Details: {e}")
 
 # ==============================================================================
 # 4. HAUPTANSICHT: AUSWAHL
@@ -137,7 +179,6 @@ if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
 
         with st.spinner(f"Scanne {len(tickers)} Aktien parallel..."):
             try:
-                # Zeitspanne anpassen: Für SMA200 brauchen wir mindestens 1 Jahr Daten history
                 download_period = "1y" if golden_cross_active else "1mo"
                 data = yf.download(tickers, period=download_period, interval="1d", group_by='ticker', progress=False)
                 
@@ -146,31 +187,25 @@ if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
                     if df.empty or len(df) < 15: 
                         continue
                     
-                    # 1. RSI berechnen & prüfen
+                    # RSI check
                     df['RSI'] = calculate_rsi(df['Close'], period=14)
                     rsi_aktuell = df['RSI'].iloc[-1]
                     
                     if not (rsi_min <= rsi_aktuell <= rsi_max):
                         continue
                     
-                    # 2. Optional: Golden Cross Logik prüfen
+                    # Golden Cross check
                     if golden_cross_active:
-                        if len(df) < 200: # Abbrechen, falls nicht genug Historie für SMA200 da ist
+                        if len(df) < 200:
                             continue
-                        
                         df['SMA50'] = df['Close'].rolling(window=50).mean()
                         df['SMA200'] = df['Close'].rolling(window=200).mean()
-                        
-                        # Bestimmen, wo SMA50 über SMA200 liegt
                         df['Above'] = df['SMA50'] > df['SMA200']
-                        # Ein echter Crossover findet statt, wenn es heute True ist, aber gestern False war
                         df['Crossover'] = df['Above'] & (~df['Above'].shift(1).fillna(True))
                         
-                        # Prüfen, ob in den letzten 5 Handelstagen ein Crossover stattfand
                         if not df['Crossover'].tail(5).any():
                             continue
                     
-                    # Wenn alle aktiven Filter bestanden wurden:
                     st.session_state.scan_results.append({
                         "ticker": ticker,
                         "rsi": f"{rsi_aktuell:.2f}"
@@ -186,7 +221,6 @@ if st.session_state.has_scanned:
     if st.session_state.scan_results:
         st.write(f"### 🎯 Treffer im gewählten Bereich ({len(st.session_state.scan_results)})")
         
-        # Grid-Layout für extrem schnelle, kompakte Ansicht ohne Scroll-Wege
         cols = st.columns(3)
         for idx, item in enumerate(st.session_state.scan_results):
             col_target = cols[idx % 3]
@@ -194,7 +228,7 @@ if st.session_state.has_scanned:
                 with st.container(border=True):
                     st.write(f"**{item['ticker']}**")
                     st.write(f"Aktueller RSI: `{item['rsi']}`")
-                    if st.button("📊 RSI-Verlauf", key=f"btn_{item['ticker']}_{idx}"):
+                    if st.button("📊 Analysieren", key=f"btn_{item['ticker']}_{idx}"):
                         show_details_popup(item["ticker"])
     else:
-        st.warning("Keine Aktien mit den gewählten Kriterien gefunden. Passe die Filter in der linken Seitenleiste an.")
+        st.warning("Keine Aktien mit den gewählten Kriterien gefunden.")
