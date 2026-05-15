@@ -46,7 +46,6 @@ def calculate_rsi(series, period=14):
     loss = -delta.clip(upper=0)
     avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
-    # Vermeidung von Division durch Null
     avg_loss = avg_loss.replace(0, 0.00001)
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
@@ -68,7 +67,7 @@ def calculate_bollinger_bands(series, period=20, num_std=2):
     return upper_band, sma, lower_band
 
 # ==============================================================================
-# 3. KORRIGIERTER & ABSOLUT SICHERER SCRAPER (MIT AUTO-FALLBACK)
+# 3. SCRAPER ENGINE (MIT AUTO-FALLBACK)
 # ==============================================================================
 def fetch_market_data(markt):
     headers = {'User-Agent': 'RSI-Scanner-Bot/1.0 (contact@example.com) Mozilla/5.0'}
@@ -154,85 +153,4 @@ def fetch_market_data(markt):
                 res = extract_from_df(df, "SDAX")
                 if len(res) >= 30: return res
         elif "EURO STOXX" in markt:
-            req = urllib.request.Request("https://en.wikipedia.org/wiki/Euro_Stoxx_50", headers=headers)
-            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
-            for df in tables:
-                res = extract_from_df(df, "EURO STOXX")
-                if len(res) >= 30: return res
-        elif "FTSE 100" in markt:
-            req = urllib.request.Request("https://en.wikipedia.org/wiki/FTSE_100_Index", headers=headers)
-            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
-            for df in tables:
-                res = extract_from_df(df, "FTSE 100")
-                if len(res) >= 50: return res
-        elif "CAC 40" in markt:
-            req = urllib.request.Request("https://en.wikipedia.org/wiki/CAC_40", headers=headers)
-            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
-            for df in tables:
-                res = extract_from_df(df, "CAC 40")
-                if len(res) >= 30: return res
-        elif "Nikkei 225" in markt:
-            req = urllib.request.Request("https://en.wikipedia.org/wiki/Nikkei_225", headers=headers)
-            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
-            for df in tables:
-                res = extract_from_df(df, "NIKKEI")
-                if len(res) >= 50: return res
-    except Exception:
-        st.sidebar.warning("Live-Scraping blockiert, nutze integriertes Backup.")
-    
-    if "USA" in markt:
-        return [{"ticker": "AAPL", "name": "Apple"}, {"ticker": "MSFT", "name": "Microsoft"}, {"ticker": "NVDA", "name": "NVIDIA"}, {"ticker": "AMZN", "name": "Amazon"}, {"ticker": "GOOGL", "name": "Alphabet"}, {"ticker": "META", "name": "Meta"}, {"ticker": "TSLA", "name": "Tesla"}]
-    else:
-        return [{"ticker": "SAP.DE", "name": "SAP"}, {"ticker": "SIE.DE", "name": "Siemens"}, {"ticker": "ALV.DE", "name": "Allianz"}, {"ticker": "DTE.DE", "name": "Deutsche Telekom"}, {"ticker": "BMW.DE", "name": "BMW"}, {"ticker": "BAS.DE", "name": "BASF"}, {"ticker": "BAYN.DE", "name": "Bayer"}]
-
-# ==============================================================================
-# 4. CHART RENDERING ENGINE
-# ==============================================================================
-def render_chart(df_chart, title_suffix):
-    if df_chart.empty or len(df_chart) < 2:
-        st.warning(f"Keine ausreichenden Intraday-Daten für {title_suffix} im Cache.")
-        return
-    
-    df_chart['RSI'] = calculate_rsi(df_chart['Close'], period=14)
-    df_chart['MACD'], df_chart['MACD_Signal'], df_chart['MACD_Hist'], _ = calculate_macd(df_chart['Close'])
-    df_chart['BB_Upper'], df_chart['BB_Middle'], df_chart['BB_Lower'] = calculate_bollinger_bands(df_chart['Close'])
-    
-    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.06, row_heights=[0.45, 0.25, 0.30])
-    
-    fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['Close'], mode='lines', name='Kurs', line=dict(color='#1f77b4', width=2.5)), row=1, col=1)
-    if 'SMA50' in df_chart.columns:
-        fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['SMA50'], mode='lines', name='SMA 50', line=dict(color='orange', width=1.5)), row=1, col=1)
-        fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['SMA200'], mode='lines', name='SMA 200', line=dict(color='red', width=1.5)), row=1, col=1)
-    
-    fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['BB_Upper'], mode='lines', name='BB Oben', line=dict(color='rgba(128, 128, 128, 0.5)', width=1.5, dash='dash')), row=1, col=1)
-    fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['BB_Middle'], mode='lines', name='BB Mitte', line=dict(color='rgba(128, 128, 128, 0.3)', width=1, dash='dot')), row=1, col=1)
-    fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['BB_Lower'], mode='lines', name='BB Unten', line=dict(color='rgba(128, 128, 128, 0.5)', width=1.5, dash='dash')), row=1, col=1)
-    
-    fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['RSI'], mode='lines', name='RSI 14', line=dict(color='purple', width=1.5)), row=2, col=1)
-    fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-    fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-    
-    fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['MACD'], mode='lines', name='MACD', line=dict(color='blue', width=1.5)), row=3, col=1)
-    fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['MACD_Signal'], mode='lines', name='Signal', line=dict(color='orange', width=1.5)), row=3, col=1)
-    fig.add_trace(gr.Bar(x=df_chart.index, y=df_chart['MACD_Hist'], name='Histogramm', marker_color='lightgray', opacity=0.7), row=3, col=1)
-    fig.add_hline(y=0, line_dash="solid", line_color="gray", row=3, col=1)
-    
-    fig.update_layout(height=580, margin=dict(l=10, r=10, t=10, b=10), showlegend=True, yaxis2=dict(range=[0, 100]))
-    st.plotly_chart(fig, use_container_width=True)
-
-# ==============================================================================
-# 5. POP-UP DIALOG WINDOW
-# ==============================================================================
-@st.dialog("📊 Aktien-Details & Signal", width="large")
-def show_details_popup(ticker, company_name):
-    with st.spinner("Lade optimierte Daten aus dem Cache..."):
-        try:
-            df_base = load_cached_history(ticker, "1y", "1d")
-            if df_base.empty or 'Close' not in df_base.columns:
-                st.error("Keine Daten von Yahoo Finance erhalten. Bitte versuche es gleich noch einmal.")
-                return
-            
-            current_price = df_base['Close'].iloc[-1]
-            isin = load_cached_isin(ticker)
-            
-            df_base['RSI'] = calculate_rsi
+            req = urllib.request.Request("https://en.
