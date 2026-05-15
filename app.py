@@ -4,6 +4,7 @@ import pandas as pd
 import urllib.request
 from io import StringIO
 import plotly.graph_objects as gr
+from plotly.subplots import make_subplots  # Neu für das geteilte Chart-Layout
 
 # Streamlit Page Config
 st.set_page_config(layout="wide", page_title="Schneller RSI-Scanner", page_icon="⚡")
@@ -41,11 +42,11 @@ st.sidebar.header("📈 Chart-Signale")
 golden_cross_active = st.sidebar.toggle("Nur mit Golden Cross (letzte 5 Tage)", value=False)
 
 # ==============================================================================
-# 3. POP-UP MIT AKTENNAMEN & SIGNAL-AMPEL
+# 3. POP-UP MIT KOMBI-CHART (KURS + SMAs & RSI DARUNTER)
 # ==============================================================================
 @st.dialog("📊 Aktien-Details & Signal", width="large")
 def show_details_popup(ticker):
-    with st.spinner("Lade Daten und Firmenprofil..."):
+    with st.spinner("Lade Daten und Berechne Indikatoren..."):
         try:
             stock = yf.Ticker(ticker)
             
@@ -53,39 +54,38 @@ def show_details_popup(ticker):
             try:
                 company_name = stock.info.get('longName', ticker)
             except Exception:
-                company_name = ticker # Fallback falls API zickt
+                company_name = ticker
             
             st.write(f"## {company_name} (`{ticker}`)")
             
-            # Daten für Indikatoren laden (1 Jahr wegen SMA200)
+            # Daten laden (1 Jahr für stabilen SMA200)
             df = stock.history(period="1y", interval="1d")
             df['RSI'] = calculate_rsi(df['Close'], period=14)
             
-            # Golden Cross für die Ampel berechnen
+            # SMAs berechnen
             df['SMA50'] = df['Close'].rolling(window=50).mean()
             df['SMA200'] = df['Close'].rolling(window=200).mean()
+            
+            # Golden Cross Auswertung
             df['Above'] = df['SMA50'] > df['SMA200']
             df['Crossover'] = df['Above'] & (~df['Above'].shift(1).fillna(True))
             recent_golden_cross = df['Crossover'].tail(5).any()
             
             rsi_aktuell = df['RSI'].iloc[-1]
-            df_last30 = df.tail(30)
+            df_last30 = df.tail(30) # Visualisierung der letzten 30 Handelstage
             
             # --- AMPEL LOGIK ---
             if rsi_aktuell < 30 or recent_golden_cross:
                 ampel_signal = "🟢 KAUFEN (Buy)"
-                ampel_color = "green"
-                grund = "Der RSI ist überverkauft (< 30) oder es gab ein Golden Cross in den letzten 5 Tagen."
+                grund = "Der RSI ist überverkauft (< 30) oder es gab ein frisches Golden Cross (letzte 5 Tage)."
             elif rsi_aktuell > 70:
                 ampel_signal = "🔴 VERKAUFEN (Sell)"
-                ampel_color = "red"
                 grund = "Der RSI ist überkauft (> 70). Korrekturrisiko erhöht."
             else:
                 ampel_signal = "🟡 HALTEN (Hold)"
-                ampel_color = "orange"
-                grund = "RSI ist im neutralen Bereich und kein aktives Ausbruchsignal vorhanden."
+                grund = "RSI ist im neutralen Bereich und kein akutes Ausbruchsignal vorhanden."
             
-            # Spalten-Layout für die Ampel-Anzeige
+            # Info-Metriken
             col1, col2 = st.columns(2)
             with col1:
                 st.metric("Aktueller RSI-Wert", f"{rsi_aktuell:.2f}")
@@ -94,14 +94,33 @@ def show_details_popup(ticker):
                 st.caption(f"**Grund:** {grund}")
             
             st.write("---")
-            st.write("### RSI-Verlauf (Letzte 30 Handelstage)")
+            st.write("### Chart-Analyse (Letzte 30 Handelstage)")
             
-            # RSI Chart
-            fig = gr.Figure()
-            fig.add_trace(gr.Scatter(x=df_last30.index, y=df_last30['RSI'], mode='lines+markers', name='RSI14', line=dict(color='purple', width=2)))
-            fig.add_hline(y=70, line_dash="dash", line_color="red")
-            fig.add_hline(y=30, line_dash="dash", line_color="green")
-            fig.update_layout(height=280, yaxis=dict(range=[0, 100]), margin=dict(l=10, r=10, t=10, b=10))
+            # Subplots erstellen: 2 Reihen, 1 Spalte (gemeinsame X-Achse für das Datum)
+            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                                vertical_spacing=0.08, 
+                                row_heights=[0.6, 0.4])
+            
+            # REIHE 1: Kurs + SMA 50 + SMA 200
+            fig.add_trace(gr.Scatter(x=df_last30.index, y=df_last30['Close'], mode='lines', name='Kurs', line=dict(color='#1f77b4', width=2)), row=1, col=1)
+            fig.add_trace(gr.Scatter(x=df_last30.index, y=df_last30['SMA50'], mode='lines', name='SMA 50', line=dict(color='orange', width=1.5)), row=1, col=1)
+            fig.add_trace(gr.Scatter(x=df_last30.index, y=df_last30['SMA200'], mode='lines', name='SMA 200', line=dict(color='red', width=1.5)), row=1, col=1)
+            
+            # REIHE 2: RSI Verlauf
+            fig.add_trace(gr.Scatter(x=df_last30.index, y=df_last30['RSI'], mode='lines+markers', name='RSI 14', line=dict(color='purple', width=2)), row=2, col=1)
+            
+            # RSI Grenzliniengestaltung in Reihe 2
+            fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+            fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+            
+            # Layout-Feinschliff (Größe und RSI-Skala begrenzen)
+            fig.update_layout(
+                height=480, 
+                margin=dict(l=10, r=10, t=10, b=10), 
+                showlegend=True,
+                yaxis2=dict(range=[0, 100]) # Zwingt die RSI-Achse auf die Range 0-100
+            )
+            
             st.plotly_chart(fig, use_container_width=True)
             
         except Exception as e:
@@ -173,7 +192,6 @@ if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
             tickers = []
 
     if tickers:
-        # Performance-Sicherheitsschranke
         if len(tickers) > 60:
             tickers = tickers[:60]
 
@@ -187,14 +205,14 @@ if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
                     if df.empty or len(df) < 15: 
                         continue
                     
-                    # RSI check
+                    # RSI Check
                     df['RSI'] = calculate_rsi(df['Close'], period=14)
                     rsi_aktuell = df['RSI'].iloc[-1]
                     
                     if not (rsi_min <= rsi_aktuell <= rsi_max):
                         continue
                     
-                    # Golden Cross check
+                    # Golden Cross Check
                     if golden_cross_active:
                         if len(df) < 200:
                             continue
