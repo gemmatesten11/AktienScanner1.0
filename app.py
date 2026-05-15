@@ -46,7 +46,7 @@ def get_wikipedia_table(url, match_index=0):
 # ==============================================================================
 # 3. BENUTZEROBERFLÄCHE (STREAMLIT)
 # ==============================================================================
-st.title("🤖 KI-Markt- & Branchen-Scanner v2.3")
+st.title("🤖 KI-Markt- & Branchen-Scanner v2.4")
 st.write("Massen-Live-Scan mit Candlestick-Charts, RSI, MACD und KI-Analyse.")
 
 markt = st.selectbox(
@@ -75,40 +75,38 @@ markt = st.selectbox(
     )
 )
 
-# Deine Branchenauswahl inklusive "Alle Branchen"
+# Deine neue Branchenstruktur
 branche = st.selectbox(
     "2. Welche Branche möchtest du filtern?",
     (
         "Alle Branchen",
-        "Informationstechnologie (Software, Hardware, Halbleiter)",
-        "Gesundheitswesen (Pharma, Biotech, Medizintechnik)",
-        "Finanzwesen (Banken, Versicherungen, Dienstleister)",
-        "Nicht-Basiskonsumgüter / Zykliker (Auto, Hotels, Handel)",
-        "Kommunikationsdienste (Telekom, Soziale Netzwerke)",
-        "Industrie (Maschinenbau, Luftfahrt, Logistik)",
-        "Basiskonsumgüter / Defensiv (Lebensmittel, Haushalt)",
-        "Energie (Öl, Gas, erneuerbare Energien)",
-        "Versorgungsunternehmen (Strom, Wasser, Gas)",
-        "Immobilien (Immobilien-AGs, REITs)",
-        "Grundstoffe / Rohstoffe"
+        "Grundindustrie (Rohstoffe, Bauwesen, Bergbau, Metalle, Öl & Gas, Chemie)",
+        "Industriegüter & Dienstleistungen (Maschinen, Transport, Elektro, Luftfahrt)",
+        "Konsumgüter (Automobil, Lebensmittel, Getränke, Haushaltsartikel)",
+        "Verbraucherdienste (Medien, Tourismus, Einzelhandel, Freizeit)",
+        "Gesundheitswesen (Pharma, Biotechnologie, med. Geräte)",
+        "Versorger (Energie- und Versorgungssektor)",
+        "Finanzwesen (Banken und Finanzdienstleister)",
+        "Versicherungen",
+        "Immobilien (Immobilieninvestmentgesellschaften, REITs)",
+        "Technologie"
     )
 )
 
+# Sektor-Mapping auf die Industriedaten von Yahoo Finance
 sektor_mapping = {
-    "Informationstechnologie (Software, Hardware, Halbleiter)": ["Technology"],
-    "Gesundheitswesen (Pharma, Biotech, Medizintechnik)": ["Healthcare"],
-    "Finanzwesen (Banken, Versicherungen, Dienstleister)": ["Financial Services"],
-    "Nicht-Basiskonsumgüter / Zykliker (Auto, Hotels, Handel)": ["Consumer Cyclical"],
-    "Kommunikationsdienste (Telekom, Soziale Netzwerke)": ["Communication Services"],
-    "Industrie (Maschinenbau, Luftfahrt, Logistik)": ["Industrials"],
-    "Basiskonsumgüter / Defensiv (Lebensmittel, Haushalt)": ["Consumer Defensive"],
-    "Energie (Öl, Gas, erneuerbare Energien)": ["Energy"],
-    "Versorgungsunternehmen (Strom, Wasser, Gas)": ["Utilities"],
-    "Immobilien (Immobilien-AGs, REITs)": ["Real Estate"],
-    "Grundstoffe / Rohstoffe": ["Basic Materials"]
+    "Grundindustrie (Rohstoffe, Bauwesen, Bergbau, Metalle, Öl & Gas, Chemie)": ["Basic Materials", "Energy"],
+    "Industriegüter & Dienstleistungen (Maschinen, Transport, Elektro, Luftfahrt)": ["Industrials"],
+    "Konsumgüter (Automobil, Lebensmittel, Getränke, Haushaltsartikel)": ["Consumer Cyclical", "Consumer Defensive"],
+    "Verbraucherdienste (Medien, Tourismus, Einzelhandel, Freizeit)": ["Consumer Cyclical"],
+    "Gesundheitswesen (Pharma, Biotechnologie, med. Geräte)": ["Healthcare"],
+    "Versorger (Energie- und Versorgungssektor)": ["Utilities"],
+    "Finanzwesen (Banken und Finanzdienstleister)": ["Financial Services"],
+    "Versicherungen": ["Financial Services"],  # Wird in der Schleife über industry verfeinert
+    "Immobilien (Immobilieninvestmentgesellschaften, REITs)": ["Real Estate"],
+    "Technologie": ["Technology", "Communication Services"]
 }
 
-# Strategie-Tuning in der Sidebar
 st.sidebar.header("⚙️ Strategie-Anpassung")
 rsi_min = st.sidebar.slider("RSI Minimum", 10, 50, 45)
 rsi_max = st.sidebar.slider("RSI Maximum", 50, 90, 70)
@@ -184,29 +182,37 @@ if st.button("🚀 Scan Starten"):
                         if df.empty or len(df) < 25: 
                             continue
                         
-                        # Branchen-Prüfung (Wird übersprungen, wenn "Alle Branchen" gewählt ist)
+                        # Erweiterter Branchen- und Sektor-Filter
                         if "Alle Branchen" not in branche:
                             t_info = yf.Ticker(ticker).info
-                            if t_info.get("sector", "") not in sektor_mapping.get(branche, []):
+                            t_sector = t_info.get("sector", "")
+                            t_industry = t_info.get("industry", "")
+                            
+                            # Sonderlogik für Versicherungen vs. Banken
+                            if branche == "Versicherungen":
+                                if "Insurance" not in t_industry:
+                                    continue
+                            elif "Finanzwesen" in branche:
+                                if "Insurance" in t_industry or t_sector != "Financial Services":
+                                    continue
+                            # Standard-Sektorprüfung für restliche Branchen
+                            elif t_sector not in sektor_mapping.get(branche, []):
                                 continue
 
-                        # Indikatoren berechnen
                         df['RSI'] = calculate_rsi(df['Close'], period=14)
                         df['MACD'], df['MACD_Signal'] = calculate_macd(df['Close'])
                         
                         last = df.iloc[-1]
                         avg_vol = df['Volume'].tail(15).mean()
                         
-                        # Filter abgleichen
                         rsi_ok = rsi_min <= last['RSI'] <= rsi_max
                         macd_ok = last['MACD'] > last['MACD_Signal']
                         vol_ok = last['Volume'] > (avg_vol * vol_mult)
                         
-                      if rsi_ok and macd_ok and vol_ok:
+                        if rsi_ok and macd_ok and vol_ok:
                             found_counter += 1
                             st.success(f"🎯 Treffer #{found_counter}: **{ticker}**")
                             
-                            # KORREKTUR: Mehrzeiliger f-String mit """ verhindert den SyntaxError
                             prompt = f"""
                             Aktie {ticker}: RSI ist {last['RSI']:.1f}, 
                             Volumen liegt bei {last['Volume']/avg_vol:.1f}x des Durchschnitts. 
@@ -215,3 +221,48 @@ if st.button("🚀 Scan Starten"):
                             
                             response = model.generate_content(prompt)
                             st.info(f"**Gemini-Analyse:** {response.text}")
+                            
+                            with st.expander(f"📊 Technische Analyse & Charts für {ticker} öffnen"):
+                                
+                                fig_chart = gr.Figure()
+                                fig_chart.add_trace(gr.Candlestick(
+                                    x=df.index,
+                                    open=df['Open'],
+                                    high=df['High'],
+                                    low=df['Low'],
+                                    close=df['Close'],
+                                    name="Kurs"
+                                ))
+                                fig_chart.update_layout(
+                                    title=f"Aktueller Kursverlauf (Candlestick-Chart) - Letzter Schlusskurs: {last['Close']:.2f}",
+                                    xaxis_rangeslider_visible=False,
+                                    height=300,
+                                    margin=dict(l=20, r=20, t=40, b=20)
+                                )
+                                st.plotly_chart(fig_chart, use_container_width=True)
+                                
+                                fig_rsi = gr.Figure()
+                                fig_rsi.add_trace(gr.Scatter(x=df.index, y=df['RSI'], mode='lines', name='RSI', line=dict(color='purple')))
+                                fig_rsi.add_hline(y=rsi_max, line_dash="dash", line_color="green", annotation_text="Max")
+                                fig_rsi.add_hline(y=rsi_min, line_dash="dash", line_color="orange", annotation_text="Min")
+                                fig_rsi.update_layout(title=f"RSI14 (Aktuell: {last['RSI']:.1f})", yaxis=dict(range=[10, 90]), height=200, margin=dict(l=20, r=20, t=40, b=20))
+                                st.plotly_chart(fig_rsi, use_container_width=True)
+                                
+                                fig_macd = gr.Figure()
+                                fig_macd.add_trace(gr.Scatter(x=df.index, y=df['MACD'], mode='lines', name='MACD', line=dict(color='blue')))
+                                fig_macd.add_trace(gr.Scatter(x=df.index, y=df['MACD_Signal'], mode='lines', name='Signal', line=dict(color='orange')))
+                                df['Histogramm'] = df['MACD'] - df['MACD_Signal']
+                                fig_macd.add_trace(gr.Bar(x=df.index, y=df['Histogramm'], name='Histo', marker_color='gray', opacity=0.3))
+                                fig_macd.update_layout(title="MACD Crossover Setup", height=200, margin=dict(l=20, r=20, t=40, b=20))
+                                st.plotly_chart(fig_macd, use_container_width=True)
+                                
+                            st.divider()
+                            
+                    except:
+                        continue
+            
+            if found_counter == 0:
+                st.warning("Scan beendet. Aktuell erfüllt kein Titel dieses Profil. Nutze die Schieberegler links, um die Kriterien zu lockern!")
+            else:
+                st.balloons()
+                st.success(f"Scan abgeschlossen! {found_counter} Kauf-Setups gefunden.")
