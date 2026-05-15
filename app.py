@@ -156,3 +156,122 @@ def show_details_popup(ticker):
                 render_chart(df_4h, "4 Std")
 
             with tab4:
+                st.write("### 1-Tages-Chart (Letzte 30 Handelstage)")
+                df_day_focus = df_base.tail(30)
+                render_chart(df_day_focus, "1 Tag")
+            
+        except Exception as e:
+            st.error(f"Fehler beim Laden der Details: {e}")
+
+# ==============================================================================
+# 4. HAUPTANSICHT
+# ==============================================================================
+st.title("⚡ Ultra-Schneller Globaler RSI-Scanner")
+markt = st.selectbox("1. Welchen Markt / Index möchtest du scannen?", ("USA (S&P 500 Large Caps)", "USA (S&P 400 Mid Caps)", "USA (S&P 600 Small Caps)", "Deutschland (DAX 40 Large Caps)", "Deutschland (MDAX Mid Caps)", "Deutschland (SDAX Small Caps)", "Eurozone (EURO STOXX 50)", "Großbritannien (FTSE 100)", "Frankreich (CAC 40)", "Japan (Nikkei 225)"))
+
+# ==============================================================================
+# 5. HIGH-SPEED SCAN LOGIK
+# ==============================================================================
+if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
+    st.session_state.scan_results = []
+    st.session_state.has_scanned = True
+    
+    with st.spinner("Hole Ticker-Liste..."):
+        try:
+            if "S&P 500" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", 0)
+                tickers = [t.replace('.', '-') for t in table['Symbol'].tolist()]
+            elif "S&P 400" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/List_of_S%26P_400_companies", 0)
+                tickers = [t.replace('.', '-') for t in table['Ticker symbol'].tolist()]
+            elif "S&P 600" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/List_of_S%26P_600_companies", 1)
+                tickers = [t.replace('.', '-') for t in table['Ticker symbol'].tolist()]
+            elif "DAX 40" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/DAX", 4)
+                tickers = table['Ticker'].tolist()
+            elif "MDAX" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/MDAX", 3)
+                tickers = [t + ".DE" for t in table['Ticker'].tolist()]
+            elif "SDAX" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/SDAX", 3)
+                tickers = [t + ".DE" for t in table['Ticker'].tolist()]
+            elif "EURO STOXX" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/Euro_Stoxx_50", 2)
+                tickers = table['Ticker'].tolist()
+            elif "FTSE 100" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/FTSE_100_Index", 4)
+                tickers = [t.replace('.', '-') + ".L" for t in table['Ticker'].tolist()]
+            elif "CAC 40" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/CAC_40", 4)
+                tickers = [t + ".PA" for t in table['Ticker'].tolist()]
+            elif "Nikkei 225" in markt:
+                table = get_wikipedia_table("https://en.wikipedia.org/wiki/Nikkei_225", 2)
+                tickers = [str(t) + ".T" for t in table['Ticker'].tolist()]
+        except Exception as e:
+            st.error(f"Fehler beim Laden der Ticker: {e}")
+            tickers = []
+
+    if tickers:
+        if len(tickers) > 60:
+            tickers = random.sample(tickers, 60)
+
+        with st.spinner(f"Scanne {len(tickers)} Aktien zufällig verteilt parallel..."):
+            try:
+                download_period = "1y" if golden_cross_active else "3mo"
+                data = yf.download(tickers, period=download_period, interval="1d", group_by='ticker', progress=False)
+                
+                for ticker in tickers:
+                    if len(tickers) > 1:
+                        if ticker not in data.columns.levels[0]: 
+                            continue
+                        df = data[ticker].dropna(subset=['Close'])
+                    else:
+                        df = data.copy().dropna(subset=['Close'])
+                        
+                    if df.empty or len(df) < 15: 
+                        continue
+                    
+                    df['RSI'] = calculate_rsi(df['Close'], period=14)
+                    rsi_aktuell = df['RSI'].iloc[-1]
+                    
+                    if not (rsi_min <= rsi_aktuell <= rsi_max):
+                        continue
+                    
+                    if golden_cross_active:
+                        if len(df) < 200: 
+                            continue
+                        df['SMA50'] = df['Close'].rolling(window=50).mean()
+                        df['SMA200'] = df['Close'].rolling(window=200).mean()
+                        
+                        df['Above'] = df['SMA50'] > df['SMA200']
+                        df['Crossover'] = df['Above'] & (~df['Above'].shift(1).fillna(True))
+                        
+                        if not df['Crossover'].tail(14).any():
+                            continue
+                    
+                    st.session_state.scan_results.append({
+                        "ticker": ticker,
+                        "rsi": f"{rsi_aktuell:.2f}"
+                    })
+            except Exception as e:
+                st.error(f"Fehler beim Daten-Download: {e}")
+
+# ==============================================================================
+# 6. ERGEBNISSE RENDERN
+# ==============================================================================
+if st.session_state.has_scanned:
+    st.write("---")
+    if st.session_state.scan_results:
+        st.write(f"### 🎯 Treffer im gewählten Bereich ({len(st.session_state.scan_results)})")
+        cols = st.columns(3)
+        for idx, item in enumerate(st.session_state.scan_results):
+            col_target = cols[idx % 3]
+            with col_target:
+                with st.container(border=True):
+                    st.write(f"**{item['ticker']}**")
+                    st.write(f"Aktueller RSI: `{item['rsi']}`")
+                    if st.button("📊 Analysieren", key=f"btn_{item['ticker']}_{idx}"):
+                        show_details_popup(item["ticker"])
+    else:
+        st.warning("Keine Aktien mit den gewählten Kriterien gefunden. Klicke einfach nochmal auf Scannen für 60 andere Zufallsaktien.")
