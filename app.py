@@ -195,7 +195,7 @@ st.sidebar.header("📈 Chart-Signale")
 golden_cross_active = st.sidebar.toggle("Nur mit Golden Cross (letzte 14 Tage)", value=False)
 
 # ==============================================================================
-# 3. POP-UP (AKTIENNAME & BOLLINGER CHART INTEGRATION)
+# 3. POP-UP DIALOG (DETAILS & CHARTS)
 # ==============================================================================
 @st.dialog("📊 Aktien-Details & Signal", width="large")
 def show_details_popup(ticker, company_name):
@@ -203,7 +203,7 @@ def show_details_popup(ticker, company_name):
         try:
             df_base = load_cached_history(ticker, "1y", "1d")
             if df_base.empty:
-                st.error("Keine Daten von Yahoo Finance erhalten. Bitte versuche es gleich noch einmal.")
+                st.error("Keine Daten von Yahoo Finance erhalten. Bitte überprüfe das Kürzel (z.B. AAPL oder SAP.DE).")
                 return
             
             current_price = df_base['Close'].iloc[-1]
@@ -264,31 +264,26 @@ def show_details_popup(ticker, company_name):
                     st.warning(f"Keine ausreichenden Intraday-Daten für {title_suffix} im Cache.")
                     return
                 
-                # Technische Indikatoren für das jeweilige Intervall berechnen
                 df_chart['RSI'] = calculate_rsi(df_chart['Close'], period=14)
                 df_chart['MACD'], df_chart['MACD_Signal'], df_chart['MACD_Hist'], _ = calculate_macd(df_chart['Close'])
                 df_chart['BB_Upper'], df_chart['BB_Middle'], df_chart['BB_Lower'] = calculate_bollinger_bands(df_chart['Close'])
                 
                 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.06, row_heights=[0.45, 0.25, 0.30])
                 
-                # --- ROW 1: KURS, SMAs & BOLLINGER BÄNDER ---
                 fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['Close'], mode='lines', name='Kurs', line=dict(color='#1f77b4', width=2.5)), row=1, col=1)
                 
                 if 'SMA50' in df_chart.columns:
                     fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['SMA50'], mode='lines', name='SMA 50', line=dict(color='orange', width=1.5)), row=1, col=1)
                     fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['SMA200'], mode='lines', name='SMA 200', line=dict(color='red', width=1.5)), row=1, col=1)
                 
-                # Bollinger Bänder (Subtil grau-gestrichelt eingezeichnet)
                 fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['BB_Upper'], mode='lines', name='BB Oben', line=dict(color='rgba(128, 128, 128, 0.5)', width=1.5, dash='dash')), row=1, col=1)
                 fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['BB_Middle'], mode='lines', name='BB Mitte (Basis)', line=dict(color='rgba(128, 128, 128, 0.3)', width=1, dash='dot')), row=1, col=1)
                 fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['BB_Lower'], mode='lines', name='BB Unten', line=dict(color='rgba(128, 128, 128, 0.5)', width=1.5, dash='dash')), row=1, col=1)
                 
-                # --- ROW 2: RSI ---
                 fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['RSI'], mode='lines', name='RSI 14', line=dict(color='purple', width=1.5)), row=2, col=1)
                 fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
                 fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
                 
-                # --- ROW 3: MACD ---
                 fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['MACD'], mode='lines', name='MACD', line=dict(color='blue', width=1.5)), row=3, col=1)
                 fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['MACD_Signal'], mode='lines', name='Signal (Geglättet)', line=dict(color='orange', width=1.5)), row=3, col=1)
                 fig.add_trace(gr.Bar(x=df_chart.index, y=df_chart['MACD_Hist'], name='Histogramm', marker_color='lightgray', opacity=0.7), row=3, col=1)
@@ -308,101 +303,4 @@ def show_details_popup(ticker, company_name):
                 render_chart(df_30m, "30 Min")
 
             with tab3:
-                st.write("### 4-Stunden-Chart (Letzte 2 Monate)")
-                df_1h = load_cached_history(ticker, "60d", "1h")
-                if not df_1h.empty:
-                    df_4h = df_1h.resample('4h').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}).dropna()
-                else:
-                    df_4h = pd.DataFrame()
-                render_chart(df_4h, "4 Std")
-
-            with tab4:
-                st.write("### 1-Tages-Chart (Letzte 30 Handelstage)")
-                df_day_focus = df_base.tail(30)
-                render_chart(df_day_focus, "1 Tag")
-            
-        except Exception as e:
-            st.error(f"Fehler im Analyse-Fenster: {e}")
-
-# ==============================================================================
-# 4. HAUPTANSICHT
-# ==============================================================================
-st.title("⚡ Ultra-Schneller Globaler RSI-Scanner")
-markt = st.selectbox("1. Welchen Markt / Index möchtest du scannen?", ("USA (S&P 500 Large Caps)", "USA (S&P 400 Mid Caps)", "USA (S&P 600 Small Caps)", "Deutschland (DAX 40 Large Caps)", "Deutschland (MDAX Mid Caps)", "Deutschland (SDAX Small Caps)", "Eurozone (EURO STOXX 50)", "Großbritannien (FTSE 100)", "Frankreich (CAC 40)", "Japan (Nikkei 225)"))
-
-# ==============================================================================
-# 5. HIGH-SPEED SCAN LOGIK
-# ==============================================================================
-if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
-    st.session_state.scan_results = []
-    st.session_state.has_scanned = True
-    
-    with st.spinner(f"Hole Ticker- und Namensdaten für {markt}..."):
-        market_data = fetch_market_data(markt)
-
-    if market_data:
-        if len(market_data) > 60:
-            market_data = random.sample(market_data, 60)
-
-        tickers = [item['ticker'] for item in market_data]
-        ticker_to_name = {item['ticker']: item['name'] for item in market_data}
-
-        with st.spinner(f"Scanne {len(tickers)} Aktien parallel aus {markt}..."):
-            try:
-                download_period = "1y" if golden_cross_active else "3mo"
-                data = yf.download(tickers, period=download_period, interval="1d", group_by='ticker', progress=False)
-                
-                for ticker in tickers:
-                    if len(tickers) > 1:
-                        if ticker not in data.columns.levels[0]: 
-                            continue
-                        df = data[ticker].dropna(subset=['Close'])
-                    else:
-                        df = data.copy().dropna(subset=['Close'])
-                        
-                    if df.empty or len(df) < 15: 
-                        continue
-                    
-                    df['RSI'] = calculate_rsi(df['Close'], period=14)
-                    rsi_aktuell = df['RSI'].iloc[-1]
-                    
-                    if not (rsi_min <= rsi_aktuell <= rsi_max):
-                        continue
-                    
-                    if golden_cross_active:
-                        if len(df) < 200: 
-                            continue
-                        df['SMA50'] = df['Close'].rolling(window=50).mean()
-                        df['SMA200'] = df['Close'].rolling(window=200).mean()
-                        df['Above'] = df['SMA50'] > df['SMA200']
-                        df['Crossover'] = df['Above'] & (~df['Above'].shift(1).fillna(True))
-                        
-                        if not df['Crossover'].tail(14).any():
-                            continue
-                    
-                    st.session_state.scan_results.append({
-                        "ticker": ticker,
-                        "name": ticker_to_name.get(ticker, ticker),
-                        "rsi": f"{rsi_aktuell:.2f}"
-                    })
-            except Exception as e:
-                st.error(f"Fehler beim Daten-Download: {e}")
-
-# ==============================================================================
-# 6. ERGEBNISSE RENDERN
-# ==============================================================================
-if st.session_state.has_scanned:
-    st.write("---")
-    if st.session_state.scan_results:
-        st.write(f"### 🎯 Treffer im gewählten Bereich ({len(st.session_state.scan_results)})")
-        cols = st.columns(3)
-        for idx, item in enumerate(st.session_state.scan_results):
-            col_target = cols[idx % 3]
-            with col_target:
-                with st.container(border=True):
-                    st.write(f"**{item['name']}**")
-                    st.caption(f"Ticker: `{item['ticker']}` | RSI: `{item['rsi']}`")
-                    if st.button("📊 Analysieren", key=f"btn_{item['ticker']}_{idx}"):
-                        show_details_popup(item["ticker"], item["name"])
-    else:
-        st.warning("Keine Aktien mit den gewählten Kriterien gefunden. Passe deine RSI-Filter an oder starte den Scan erneut.")
+                st.write("### 4-St
