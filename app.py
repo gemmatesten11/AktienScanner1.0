@@ -94,10 +94,53 @@ def show_details_popup(ticker):
             recent_golden_cross = df_base['Crossover'].tail(14).any()
             rsi_aktuell = df_base['RSI'].iloc[-1]
             
+            # KORRIGIERTE STRINGS IN DER AMPEL-LOGIK
             if rsi_aktuell > 70:
                 ampel_signal = "🔴 VERKAUFEN (Sell)"
                 grund = "Der RSI (Tagesbasis) ist überkauft (> 70). Das Korrekturrisiko ist kurzfristig erhöht."
             elif rsi_aktuell < 30 or recent_golden_cross:
                 ampel_signal = "🟢 KAUFEN (Buy)"
                 if rsi_aktuell < 30 and recent_golden_cross:
-                    grund = "St
+                    grund = "Starkes Signal! RSI ist überverkauft (< 30) UND es liegt ein frisches Golden Cross vor."
+                elif rsi_aktuell < 30:
+                    grund = "Der RSI ist überverkauft (< 30). Die Aktie ist technisch reif für eine Erholung."
+                else:
+                    grund = "Es gab ein frisches Golden Cross (SMA50 schneidet SMA200) in den letzten 14 Tagen."
+            else:
+                ampel_signal = "🟡 HALTEN (Hold)"
+                grund = "Die Aktie befindet sich im neutralen Tagesbereich. Kein akutes Ausbruchsignal vorhanden."
+            
+            st.markdown(f"### Signal-Ampel (Tagesbasis): {ampel_signal}")
+            st.caption(f"**Grund:** {grund}")
+            st.write("")
+
+            tab1, tab2, tab3, tab4 = st.tabs(["⏱️ 10 Min", "⏱️ 30 Min", "⏳ 4 Std", "📅 1 Tag (Klassisch)"])
+            
+            def render_chart(df_chart, title_suffix):
+                if df_chart.empty or len(df_chart) < 2:
+                    st.warning(f"Keine ausreichenden Chartdaten für {title_suffix} verfügbar.")
+                    return
+                
+                df_chart['RSI'] = calculate_rsi(df_chart['Close'], period=14)
+                
+                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08, row_heights=[0.6, 0.4])
+                fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['Close'], mode='lines', name='Kurs', line=dict(color='#1f77b4', width=2)), row=1, col=1)
+                
+                if 'SMA50' in df_chart.columns:
+                    fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['SMA50'], mode='lines', name='SMA 50', line=dict(color='orange', width=1.5)), row=1, col=1)
+                    fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['SMA200'], mode='lines', name='SMA 200', line=dict(color='red', width=1.5)), row=1, col=1)
+                
+                fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['RSI'], mode='lines', name='RSI 14', line=dict(color='purple', width=1.5)), row=2, col=1)
+                fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+                fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+                
+                fig.update_layout(height=400, margin=dict(l=10, r=10, t=10, b=10), showlegend=True, yaxis2=dict(range=[0, 100]))
+                st.plotly_chart(fig, use_container_width=True)
+
+            with tab1:
+                st.write("### 10-Minuten-Chart (Letzte 5 Handelstage)")
+                df_10m = stock.history(period="5d", interval="10m")
+                render_chart(df_10m, "10 Min")
+
+            with tab2:
+                st.write("### 30-Minuten-Chart (Letzte 14
