@@ -53,10 +53,8 @@ def show_details_popup(ticker):
         try:
             stock = yf.Ticker(ticker)
             
-            # Stammdaten abrufen
             try:
                 company_name = stock.info.get('longName', ticker)
-                # Aktuellen Live-Kurs aus den Info-Daten ziehen
                 current_price = stock.info.get('regularMarketPrice', None)
                 currency = stock.info.get('currency', '$')
             except Exception:
@@ -73,7 +71,6 @@ def show_details_popup(ticker):
                 
             st.write(f"## {company_name} (`{ticker}`)")
             
-            # Layout für Kennzahlen (Kurs + ISIN)
             meta_col1, meta_col2 = st.columns(2)
             with meta_col1:
                 if current_price:
@@ -88,7 +85,6 @@ def show_details_popup(ticker):
             
             st.write("---")
             
-            # Basis-Daten laden (1 Jahr täglich) für die fundamentale Signal-Ampel
             df_base = stock.history(period="1y", interval="1d")
             df_base['RSI'] = calculate_rsi(df_base['Close'], period=14)
             df_base['SMA50'] = df_base['Close'].rolling(window=50).mean()
@@ -98,138 +94,10 @@ def show_details_popup(ticker):
             recent_golden_cross = df_base['Crossover'].tail(14).any()
             rsi_aktuell = df_base['RSI'].iloc[-1]
             
-            # Signal-Ampel rendern
             if rsi_aktuell > 70:
                 ampel_signal = "🔴 VERKAUFEN (Sell)"
                 grund = "Der RSI (Tagesbasis) ist überkauft (> 70). Das Korrekturrisiko ist kurzfristig erhöht."
             elif rsi_aktuell < 30 or recent_golden_cross:
                 ampel_signal = "🟢 KAUFEN (Buy)"
                 if rsi_aktuell < 30 and recent_golden_cross:
-                    grund = "Starkes Signal! RSI ist überverkauft (< 30) UND es liegt ein frisches Golden Cross vor."
-                elif rsi_aktuell < 30:
-                    grund = "Der RSI ist überverkauft (< 30). Die Aktie ist technisch reif für eine Erholung."
-                else:
-                    grund = "Es gab ein frisches Golden Cross (SMA50 schneidet SMA200) in den letzten 14 Tagen."
-            else:
-                ampel_signal = "🟡 HALTEN (Hold)"
-                grund = "Die Aktie befindet sich im neutralen Tagesbereich. Kein akutes Ausbruchsignal vorhanden."
-            
-            st.markdown(f"### Signal-Ampel (Tagesbasis): {ampel_signal}")
-            st.caption(f"**Grund:** {grund}")
-            st.write("")
-
-            # ==============================================================================
-            # REITER (TABS) FÜR DIE VERSCHIEDENEN ZEITFENSTER
-            # ==============================================================================
-            tab1, tab2, tab3, tab4 = st.tabs(["⏱️ 10 Min", "⏱️ 30 Min", "⏳ 4 Std", "📅 1 Tag (Klassisch)"])
-            
-            # Hilfsfunktion, um redundanten Chart-Code zu vermeiden
-            def render_chart(df_chart, title_suffix):
-                if df_chart.empty or len(df_chart) < 2:
-                    st.warning(f"Keine ausreichenden Chartdaten für {title_suffix} verfügbar.")
-                    return
-                
-                # RSI berechnen für das spezifische Intervall
-                df_chart['RSI'] = calculate_rsi(df_chart['Close'], period=14)
-                
-                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08, row_heights=[0.6, 0.4])
-                fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['Close'], mode='lines', name='Kurs', line=dict(color='#1f77b4', width=2)), row=1, col=1)
-                
-                # SMAs nur auf sinnvollen großen Zeitfenstern (z.B. Tag) zeichnen, sonst wird es unübersichtlich
-                if 'SMA50' in df_chart.columns:
-                    fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['SMA50'], mode='lines', name='SMA 50', line=dict(color='orange', width=1.5)), row=1, col=1)
-                    fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['SMA200'], mode='lines', name='SMA 200', line=dict(color='red', width=1.5)), row=1, col=1)
-                
-                fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['RSI'], mode='lines', name='RSI 14', line=dict(color='purple', width=1.5)), row=2, col=1)
-                fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-                fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-                
-                fig.update_layout(height=400, margin=dict(l=10, r=10, t=10, b=10), showlegend=True, yaxis2=dict(range=[0, 100]))
-                st.plotly_chart(fig, use_container_width=True)
-
-            with tab1:
-                st.write("### 10-Minuten-Chart (Letzte 5 Handelstage)")
-                df_10m = stock.history(period="5d", interval="10m")
-                render_chart(df_10m, "10 Min")
-
-            with tab2:
-                st.write("### 30-Minuten-Chart (Letzte 14 Tage)")
-                df_30m = stock.history(period="14d", interval="30m")
-                render_chart(df_30m, "30 Min")
-
-            with tab3:
-                st.write("### 4-Stunden-Chart (Letzte 2 Monate)")
-                # Yahoo Finance kennt kein '4h' Intervall, nutzt aber '1h' oder '90m'. 
-                # Um exakte 4 Stunden abzubilden, resampeln wir die 1-Stunden-Bars.
-                df_1h = stock.history(period="60d", interval="1h")
-                if not df_1h.empty:
-                    df_4h = df_1h.resample('4h').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}).dropna()
-                else:
-                    df_4h = pd.DataFrame()
-                render_chart(df_4h, "4 Std")
-
-            with tab4:
-                st.write("### 1-Tages-Chart (Letzte 30 Handelstage im Fokus)")
-                df_day_focus = df_base.tail(30)
-                render_chart(df_day_focus, "1 Tag")
-            
-        except Exception as e:
-            st.error(f"Fehler beim Laden der Details: {e}")
-
-# ==============================================================================
-# 4. HAUPTANSICHT
-# ==============================================================================
-st.title("⚡ Ultra-Schneller Globaler RSI-Scanner")
-markt = st.selectbox("1. Welchen Markt / Index möchtest du scannen?", ("USA (S&P 500 Large Caps)", "USA (S&P 400 Mid Caps)", "USA (S&P 600 Small Caps)", "Deutschland (DAX 40 Large Caps)", "Deutschland (MDAX Mid Caps)", "Deutschland (SDAX Small Caps)", "Eurozone (EURO STOXX 50)", "Großbritannien (FTSE 100)", "Frankreich (CAC 40)", "Japan (Nikkei 225)"))
-
-# ==============================================================================
-# 5. HIGH-SPEED SCAN LOGIK
-# ==============================================================================
-if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
-    st.session_state.scan_results = []
-    st.session_state.has_scanned = True
-    
-    with st.spinner("Hole Ticker-Liste..."):
-        try:
-            if "S&P 500" in markt:
-                table = get_wikipedia_table("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", 0)
-                tickers = [t.replace('.', '-') for t in table['Symbol'].tolist()]
-            elif "S&P 400" in markt:
-                table = get_wikipedia_table("https://en.wikipedia.org/wiki/List_of_S%26P_400_companies", 0)
-                tickers = [t.replace('.', '-') for t in table['Ticker symbol'].tolist()]
-            elif "S&P 600" in markt:
-                table = get_wikipedia_table("https://en.wikipedia.org/wiki/List_of_S%26P_600_companies", 1)
-                tickers = [t.replace('.', '-') for t in table['Ticker symbol'].tolist()]
-            elif "DAX 40" in markt:
-                table = get_wikipedia_table("https://en.wikipedia.org/wiki/DAX", 4)
-                tickers = table['Ticker'].tolist()
-            elif "MDAX" in markt:
-                table = get_wikipedia_table("https://en.wikipedia.org/wiki/MDAX", 3)
-                tickers = [t + ".DE" for t in table['Ticker'].tolist()]
-            elif "SDAX" in markt:
-                table = get_wikipedia_table("https://en.wikipedia.org/wiki/SDAX", 3)
-                tickers = [t + ".DE" for t in table['Ticker'].tolist()]
-            elif "EURO STOXX" in markt:
-                table = get_wikipedia_table("https://en.wikipedia.org/wiki/Euro_Stoxx_50", 2)
-                tickers = table['Ticker'].tolist()
-            elif "FTSE 100" in markt:
-                table = get_wikipedia_table("https://en.wikipedia.org/wiki/FTSE_100_Index", 4)
-                tickers = [t.replace('.', '-') + ".L" for t in table['Ticker'].tolist()]
-            elif "CAC 40" in markt:
-                table = get_wikipedia_table("https://en.wikipedia.org/wiki/CAC_40", 4)
-                tickers = [t + ".PA" for t in table['Ticker'].tolist()]
-            elif "Nikkei 225" in markt:
-                table = get_wikipedia_table("https://en.wikipedia.org/wiki/Nikkei_225", 2)
-                tickers = [str(t) + ".T" for t in table['Ticker'].tolist()]
-        except Exception as e:
-            st.error(f"Fehler beim Laden der Ticker: {e}")
-            tickers = []
-
-    if tickers:
-        if len(tickers) > 60:
-            tickers = random.sample(tickers, 60)
-
-        with st.spinner(f"Scanne {len(tickers)} Aktien zufällig verteilt parallel..."):
-            try:
-                download_period = "1y" if golden_cross_active else "3mo"
-                data = yf.download(tickers, period=download_period, interval
+                    grund = "St
