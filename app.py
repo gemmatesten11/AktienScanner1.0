@@ -1,19 +1,18 @@
 # ==============================================================================
 # app.py
-# KI-Aktien Screener mit RSI-Filter, Golden Cross & Live-Tickersuche
+# KI Aktien Screener ohne TA-Library
+# RSI + Golden Cross + Yahoo Live Suche
 # ==============================================================================
 
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import ta
 import urllib.parse
 import urllib.request
 import json
-from datetime import datetime, timedelta
 
 # ==============================================================================
-# 1. APP CONFIG
+# PAGE CONFIG
 # ==============================================================================
 
 st.set_page_config(
@@ -23,57 +22,54 @@ st.set_page_config(
 )
 
 st.title("📈 KI Aktien Screener")
-st.caption("RSI-Scanner + Golden Cross + Live Yahoo Finance Suche")
+st.caption("RSI Scanner + Golden Cross + Live Yahoo Suche")
 
 # ==============================================================================
-# 2. SIDEBAR
+# SIDEBAR
 # ==============================================================================
 
-st.sidebar.header("⚡ RSI-Filter")
+st.sidebar.header("⚡ RSI Filter")
 
 rsi_min = st.sidebar.slider(
-    "Minimaler RSI-Wert",
+    "Minimaler RSI",
     0,
     100,
-    20,
-    step=1
+    20
 )
 
 rsi_max = st.sidebar.slider(
-    "Maximaler RSI-Wert",
+    "Maximaler RSI",
     0,
     100,
-    40,
-    step=1
+    40
 )
 
 # ------------------------------------------------------------------------------
-# Golden Cross Filter
+# Golden Cross
 # ------------------------------------------------------------------------------
 
 st.sidebar.write("---")
-st.sidebar.header("📈 Chart-Signale")
 
-golden_cross_active = st.sidebar.toggle(
-    "Nur mit Golden Cross (letzte 14 Tage)",
+golden_cross_active = st.sidebar.checkbox(
+    "Nur Golden Cross Aktien",
     value=False
 )
 
 # ------------------------------------------------------------------------------
-# Direkte Aktiensuche
+# Live Suche
 # ------------------------------------------------------------------------------
 
 st.sidebar.write("---")
 st.sidebar.header("🔍 Direkte Aktiensuche")
 
 # ==============================================================================
-# 3. TICKER SUCHE
+# YAHOO SEARCH
 # ==============================================================================
 
 @st.cache_data(ttl=300)
 def get_ticker_suggestions(query):
 
-    if not query or len(query) < 2:
+    if len(query) < 2:
         return []
 
     try:
@@ -86,14 +82,18 @@ def get_ticker_suggestions(query):
         )
 
         headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "application/json"
+            "User-Agent": "Mozilla/5.0"
         }
 
-        req = urllib.request.Request(url, headers=headers)
+        req = urllib.request.Request(
+            url,
+            headers=headers
+        )
 
         with urllib.request.urlopen(req, timeout=5) as response:
-            data = json.loads(response.read().decode("utf-8"))
+            data = json.loads(
+                response.read().decode("utf-8")
+            )
 
         suggestions = []
 
@@ -120,16 +120,15 @@ def get_ticker_suggestions(query):
 
         return suggestions
 
-    except Exception as e:
-        st.sidebar.error(f"Yahoo-Suche fehlgeschlagen: {e}")
+    except Exception:
         return []
 
-# ------------------------------------------------------------------------------
-# Suchfeld
-# ------------------------------------------------------------------------------
+# ==============================================================================
+# SUCHFELD
+# ==============================================================================
 
 search_query = st.sidebar.text_input(
-    "Aktienname oder Ticker eingeben:",
+    "Ticker oder Name:",
     placeholder="z.B. Apple oder AAPL"
 )
 
@@ -139,35 +138,39 @@ if len(search_query) >= 2:
 
     if suggestions:
 
-        options_dict = {
+        options = {
             item["label"]: item
             for item in suggestions
         }
 
         selected_label = st.sidebar.selectbox(
-            "Gefundene Treffer:",
-            list(options_dict.keys()),
-            index=0,
-            key="search_autocomplete"
+            "Treffer:",
+            list(options.keys())
         )
 
-        selected_stock = options_dict[selected_label]
+        selected_stock = options[selected_label]
 
         if st.sidebar.button(
             f"📊 {selected_stock['ticker']} analysieren",
             use_container_width=True
         ):
-            st.session_state["selected_ticker"] = selected_stock["ticker"]
-            st.session_state["selected_name"] = selected_stock["name"]
+
+            st.session_state["selected_ticker"] = (
+                selected_stock["ticker"]
+            )
+
+            st.session_state["selected_name"] = (
+                selected_stock["name"]
+            )
 
     else:
-        st.sidebar.caption("Keine Vorschläge gefunden.")
+        st.sidebar.warning("Keine Treffer gefunden")
 
 # ==============================================================================
-# 4. AKTIENLISTE
+# STANDARD AKTIEN
 # ==============================================================================
 
-DEFAULT_TICKERS = [
+TICKERS = [
     "AAPL",
     "MSFT",
     "NVDA",
@@ -175,15 +178,35 @@ DEFAULT_TICKERS = [
     "META",
     "GOOGL",
     "TSLA",
-    "NFLX",
     "AMD",
+    "NFLX",
     "PLTR",
     "SPY",
     "QQQ"
 ]
 
 # ==============================================================================
-# 5. RSI + GOLDEN CROSS ANALYSE
+# RSI BERECHNUNG
+# ==============================================================================
+
+def calculate_rsi(data, window=14):
+
+    delta = data.diff()
+
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+
+    avg_gain = gain.rolling(window=window).mean()
+    avg_loss = loss.rolling(window=window).mean()
+
+    rs = avg_gain / avg_loss
+
+    rsi = 100 - (100 / (1 + rs))
+
+    return rsi
+
+# ==============================================================================
+# ANALYSE
 # ==============================================================================
 
 @st.cache_data(ttl=3600)
@@ -194,22 +217,28 @@ def analyze_stock(ticker):
         data = yf.download(
             ticker,
             period="1y",
-            progress=False,
-            auto_adjust=True
+            auto_adjust=True,
+            progress=False
         )
 
         if data.empty:
             return None
 
         # RSI
-        data["RSI"] = ta.momentum.RSIIndicator(
-            close=data["Close"],
-            window=14
-        ).rsi()
+        data["RSI"] = calculate_rsi(data["Close"])
 
-        # Moving Averages
-        data["SMA50"] = data["Close"].rolling(50).mean()
-        data["SMA200"] = data["Close"].rolling(200).mean()
+        # SMA
+        data["SMA50"] = (
+            data["Close"]
+            .rolling(50)
+            .mean()
+        )
+
+        data["SMA200"] = (
+            data["Close"]
+            .rolling(200)
+            .mean()
+        )
 
         latest = data.iloc[-1]
 
@@ -244,7 +273,7 @@ def analyze_stock(ticker):
         return None
 
 # ==============================================================================
-# 6. SCREENER
+# SCREENER
 # ==============================================================================
 
 st.subheader("📊 Gefilterte Aktien")
@@ -253,13 +282,15 @@ results = []
 
 progress = st.progress(0)
 
-for idx, ticker in enumerate(DEFAULT_TICKERS):
+for index, ticker in enumerate(TICKERS):
 
     stock = analyze_stock(ticker)
 
     if stock:
 
-        rsi_ok = rsi_min <= stock["RSI"] <= rsi_max
+        rsi_ok = (
+            rsi_min <= stock["RSI"] <= rsi_max
+        )
 
         golden_ok = (
             stock["GoldenCross"]
@@ -270,39 +301,41 @@ for idx, ticker in enumerate(DEFAULT_TICKERS):
         if rsi_ok and golden_ok:
             results.append(stock)
 
-    progress.progress((idx + 1) / len(DEFAULT_TICKERS))
+    progress.progress(
+        (index + 1) / len(TICKERS)
+    )
 
 progress.empty()
 
 # ==============================================================================
-# 7. RESULTATE
+# RESULTATE
 # ==============================================================================
 
 if results:
 
     df = pd.DataFrame(results)
 
-    display_df = df[
-        [
-            "Ticker",
-            "Preis",
-            "RSI",
-            "GoldenCross",
-            "SMA50",
-            "SMA200"
-        ]
-    ]
-
     st.dataframe(
-        display_df,
+        df[
+            [
+                "Ticker",
+                "Preis",
+                "RSI",
+                "GoldenCross",
+                "SMA50",
+                "SMA200"
+            ]
+        ],
         use_container_width=True
     )
 
 else:
-    st.warning("Keine Aktien entsprechen den aktuellen Filtern.")
+    st.warning(
+        "Keine Aktien entsprechen dem Filter."
+    )
 
 # ==============================================================================
-# 8. DETAILANSICHT
+# DETAILANSICHT
 # ==============================================================================
 
 if "selected_ticker" in st.session_state:
@@ -311,7 +344,8 @@ if "selected_ticker" in st.session_state:
     name = st.session_state["selected_name"]
 
     st.write("---")
-    st.header(f"📈 Detailanalyse: {ticker}")
+
+    st.header(f"📈 {ticker} — {name}")
 
     stock = analyze_stock(ticker)
 
@@ -320,7 +354,7 @@ if "selected_ticker" in st.session_state:
         col1, col2, col3 = st.columns(3)
 
         col1.metric(
-            "Aktueller Preis",
+            "Preis",
             f"${stock['Preis']}"
         )
 
@@ -334,25 +368,34 @@ if "selected_ticker" in st.session_state:
             "JA" if stock["GoldenCross"] else "NEIN"
         )
 
-        chart_df = stock["Data"][[
-            "Close",
-            "SMA50",
-            "SMA200"
-        ]]
+        # Chart
+        chart_data = stock["Data"][
+            [
+                "Close",
+                "SMA50",
+                "SMA200"
+            ]
+        ]
 
-        st.line_chart(chart_df)
+        st.line_chart(chart_data)
 
-        st.dataframe(
-            stock["Data"].tail(30),
-            use_container_width=True
-        )
+        # Rohdaten
+        with st.expander("📋 Letzte 30 Tage"):
+
+            st.dataframe(
+                stock["Data"].tail(30),
+                use_container_width=True
+            )
 
     else:
-        st.error("Fehler beim Laden der Aktiendaten.")
+        st.error("Aktie konnte nicht geladen werden.")
 
 # ==============================================================================
-# 9. FOOTER
+# FOOTER
 # ==============================================================================
 
 st.write("---")
-st.caption("Entwickelt mit Streamlit • Yahoo Finance • TA-Lib")
+
+st.caption(
+    "Entwickelt mit Streamlit + Yahoo Finance"
+)
