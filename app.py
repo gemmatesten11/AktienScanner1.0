@@ -11,6 +11,30 @@ import random
 st.set_page_config(layout="wide", page_title="Schneller RSI-Scanner", page_icon="⚡")
 
 # ==============================================================================
+# CACHING-LAYER (REDUZIERT DIE ANZAHL DER API-ANFRAGEN DRASTISCH)
+# ==============================================================================
+@st.cache_data(ttl=300)  # Speichert Chartdaten für 5 Minuten im Cache
+def load_cached_history(ticker, period, interval):
+    try:
+        stock = yf.Ticker(ticker)
+        df = stock.history(period=period, interval=interval)
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+@st.cache_data(ttl=86400)  # Stammdaten ändern sich selten, 24 Std. Cache
+def load_cached_meta(ticker):
+    # Extrem vorsichtiger Abruf, um Rate Limits zu umgehen
+    try:
+        stock = yf.Ticker(ticker)
+        isin = stock.get_isin()
+        if not isin or isin == '-':
+            isin = "Nicht verfügbar"
+        return {"isin": isin}
+    except Exception:
+        return {"isin": "Nicht verfügbar"}
+
+# ==============================================================================
 # 1. KORRIGIERTE RSI FUNKTION (WILDER'S SMOOTHING)
 # ==============================================================================
 def calculate_rsi(series, period=14):
@@ -45,38 +69,31 @@ st.sidebar.header("📈 Chart-Signale")
 golden_cross_active = st.sidebar.toggle("Nur mit Golden Cross (letzte 14 Tage)", value=False)
 
 # ==============================================================================
-# 3. POP-UP (DETAILS, LIVE-KURS & MULTI-TIMEFRAME CHARTS)
+# 3. POP-UP (DETAILS, CACHED LIVE-KURS & MULTI-TIMEFRAME CHARTS)
 # ==============================================================================
 @st.dialog("📊 Aktien-Details & Signal", width="large")
 def show_details_popup(ticker):
-    with st.spinner("Lade Live-Kurse und Zeitfenster..."):
+    with st.spinner("Lade optimierte Daten aus dem Cache..."):
         try:
-            stock = yf.Ticker(ticker)
+            # 1. Basis-Tagesdaten aus dem Cache laden
+            df_base = load_cached_history(ticker, "1y", "1d")
             
-            try:
-                company_name = stock.info.get('longName', ticker)
-                current_price = stock.info.get('regularMarketPrice', None)
-                currency = stock.info.get('currency', '$')
-            except Exception:
-                company_name = ticker
-                current_price = None
-                currency = ""
+            if df_base.empty:
+                st.error("Yahoo Finance blockiert gerade temporär Anfragen (Rate Limit). Bitte warte 1-2 Minuten, bevor du diese Aktie erneut analysierst.")
+                return
             
-            try:
-                isin = stock.get_isin()
-                if not isin or isin == '-':
-                    isin = "Nicht verfügbar"
-            except Exception:
-                isin = "Nicht verfügbar"
-                
-            st.write(f"## {company_name} (`{ticker}`)")
+            # 2. Live-Kurs ressourcenschonend aus dem letzten Schlusskurs extrahieren
+            current_price = df_base['Close'].iloc[-1]
+            
+            # 3. Stammdaten (ISIN) aus dem Langzeit-Cache laden
+            meta = load_cached_meta(ticker)
+            isin = meta["isin"]
+            
+            st.write(f"## Analyse für Aktie: `{ticker}`")
             
             meta_col1, meta_col2 = st.columns(2)
             with meta_col1:
-                if current_price:
-                    st.metric("Aktueller Live-Kurs", f"{current_price:,.2f} {currency}")
-                else:
-                    st.caption("Live-Kurs temporär nicht verfügbar")
+                st.metric("Aktueller Kurs (Zeitverzögert)", f"{current_price:,.2f}")
             with meta_col2:
                 st.write(f"**Identifikation:** ISIN/WKN: `{isin}`")
                 tv_ticker = ticker.split('.')[0]
@@ -85,7 +102,7 @@ def show_details_popup(ticker):
             
             st.write("---")
             
-            df_base = stock.history(period="1y", interval="1d")
+            # Technische Indikatoren berechnen
             df_base['RSI'] = calculate_rsi(df_base['Close'], period=14)
             df_base['SMA50'] = df_base['Close'].rolling(window=50).mean()
             df_base['SMA200'] = df_base['Close'].rolling(window=200).mean()
@@ -94,6 +111,7 @@ def show_details_popup(ticker):
             recent_golden_cross = df_base['Crossover'].tail(14).any()
             rsi_aktuell = df_base['RSI'].iloc[-1]
             
+            # Signal-Ampel Logik
             if rsi_aktuell > 70:
                 ampel_signal = "🔴 VERKAUFEN (Sell)"
                 grund = "Der RSI (Tagesbasis) ist überkauft (> 70). Das Korrekturrisiko ist kurzfristig erhöht."
@@ -107,17 +125,18 @@ def show_details_popup(ticker):
                     grund = "Es gab ein frisches Golden Cross (SMA50 schneidet SMA200) in den letzten 14 Tagen."
             else:
                 ampel_signal = "🟡 HALTEN (Hold)"
-                grund = "Die Aktie befindet sich im Antwortbereich auf Tagesbasis im neutralen Sektor."
+                grund = "Die Aktie befindet sich auf Tagesbasis im neutralen Sektor."
             
             st.markdown(f"### Signal-Ampel (Tagesbasis): {ampel_signal}")
             st.caption(f"**Grund:** {grund}")
             st.write("")
 
+            # Multi-Timeframe Tabs
             tab1, tab2, tab3, tab4 = st.tabs(["⏱️ 10 Min", "⏱️ 30 Min", "⏳ 4 Std", "📅 1 Tag (Klassisch)"])
             
             def render_chart(df_chart, title_suffix):
                 if df_chart.empty or len(df_chart) < 2:
-                    st.warning(f"Keine ausreichenden Chartdaten für {title_suffix} verfügbar.")
+                    st.warning(f"Keine ausreichenden Intraday-Daten für {title_suffix} im Cache.")
                     return
                 
                 df_chart['RSI'] = calculate_rsi(df_chart['Close'], period=14)
@@ -138,17 +157,17 @@ def show_details_popup(ticker):
 
             with tab1:
                 st.write("### 10-Minuten-Chart (Letzte 5 Handelstage)")
-                df_10m = stock.history(period="5d", interval="10m")
+                df_10m = load_cached_history(ticker, "5d", "10m")
                 render_chart(df_10m, "10 Min")
 
             with tab2:
                 st.write("### 30-Minuten-Chart (Letzte 14 Tage)")
-                df_30m = stock.history(period="14d", interval="30m")
+                df_30m = load_cached_history(ticker, "14d", "30m")
                 render_chart(df_30m, "30 Min")
 
             with tab3:
                 st.write("### 4-Stunden-Chart (Letzte 2 Monate)")
-                df_1h = stock.history(period="60d", interval="1h")
+                df_1h = load_cached_history(ticker, "60d", "1h")
                 if not df_1h.empty:
                     df_4h = df_1h.resample('4h').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}).dropna()
                 else:
@@ -161,7 +180,7 @@ def show_details_popup(ticker):
                 render_chart(df_day_focus, "1 Tag")
             
         except Exception as e:
-            st.error(f"Fehler beim Laden der Details: {e}")
+            st.error(f"Fehler im Analyse-Fenster: {e}")
 
 # ==============================================================================
 # 4. HAUPTANSICHT
