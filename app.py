@@ -238,7 +238,7 @@ def show_details_popup(ticker, company_name):
             
             st.write("---")
             
-            if rsi_aktuell > 70:
+           if rsi_aktuell > 70:
                 ampel_signal = "🔴 VERKAUFEN (Sell)"
                 grund = "Der RSI (Tagesbasis) ist überkauft (> 70). Das Korrekturrisiko ist kurzfristig erhöht."
             elif rsi_aktuell < 30 or recent_golden_cross:
@@ -248,4 +248,7 @@ def show_details_popup(ticker, company_name):
                 elif rsi_aktuell < 30:
                     grund = "Der RSI ist überverkauft (< 30). Die Aktie ist technisch reif für eine Erholung."
                 else:
-                    grund = "Es gab ein frisches Golden Cross (SMA
+                    grund = "Es gab ein frisches Golden Cross (SMA50 schneidet SMA200) in den letzten 14 Tagen."
+            else:
+                ampel_signal = "🟡 HALTEN (Hold)"
+                grund = "Die Aktie befindet sich auf Tagesbasis im neutralen Sektor."
