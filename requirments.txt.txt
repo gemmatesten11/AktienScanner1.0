@@ -1,0 +1,6 @@
+pandas
+yfinance
+pandas_ta
+google-generativeai
+streamlit
+lxml
