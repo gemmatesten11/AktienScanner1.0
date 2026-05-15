@@ -11,7 +11,7 @@ import random
 st.set_page_config(layout="wide", page_title="Schneller RSI-Scanner", page_icon="⚡")
 
 # ==============================================================================
-# CACHING-LAYER (REDUZIERT DIE ANZAHL DER API-ANFRAGEN DRASTISCH)
+# CACHING-LAYER
 # ==============================================================================
 @st.cache_data(ttl=300)  # Speichert Chartdaten für 5 Minuten im Cache
 def load_cached_history(ticker, period, interval):
@@ -22,23 +22,16 @@ def load_cached_history(ticker, period, interval):
     except Exception:
         return pd.DataFrame()
 
-@st.cache_data(ttl=86400)  # Stammdaten ändern sich selten, 24 Std. Cache
-def load_cached_meta(ticker):
+@st.cache_data(ttl=86400)  # ISIN ändert sich nie, 24 Std. Cache
+def load_cached_isin(ticker):
     try:
         stock = yf.Ticker(ticker)
-        try:
-            company_name = stock.info.get('longName', ticker)
-        except Exception:
-            company_name = ticker
-        try:
-            isin = stock.get_isin()
-            if not isin or isin == '-':
-                isin = "Nicht verfügbar"
-        except Exception:
-            isin = "Nicht verfügbar"
-        return {"isin": isin, "name": company_name}
+        isin = stock.get_isin()
+        if not isin or isin == '-':
+            return "Nicht verfügbar"
+        return isin
     except Exception:
-        return {"isin": "Nicht verfügbar", "name": ticker}
+        return "Nicht verfügbar"
 
 # ==============================================================================
 # TECHNISCHE INDIKATOREN (RSI & MACD)
@@ -62,128 +55,120 @@ def calculate_macd(series, fast=12, slow=26, signal=9):
     return macd, macd_signal, macd_hist, macd_pct
 
 # ==============================================================================
-# DYNAMISCHER & ROBUSTER TICKER-SCRAPER
+# INTELLIGENTER & DOPPELT GESICHERTER TICKER + NAMEN SCRAPER
 # ==============================================================================
-def fetch_market_tickers(markt):
+def fetch_market_data(markt):
     headers = {'User-Agent': 'Mozilla/5.0'}
     
+    def extract_from_df(df, market_type):
+        cols_lower = [str(c).lower() for c in df.columns]
+        t_idx = -1
+        for idx, c in enumerate(cols_lower):
+            if any(k in c for k in ['symbol', 'kürzel', 'ticker', 'epic']):
+                t_idx = idx
+                break
+        n_idx = -1
+        for idx, c in enumerate(cols_lower):
+            if any(k in c for k in ['security', 'unternehmen', 'company', 'name', 'firma']) and idx != t_idx:
+                n_idx = idx
+                break
+        if t_idx == -1: return []
+        if n_idx == -1: n_idx = 0
+        
+        t_col = df.columns[t_idx]
+        n_col = df.columns[n_idx]
+        
+        extracted = []
+        for _, row in df.iterrows():
+            ticker = str(row[t_col]).split('[')[0].strip().upper()
+            name = str(row[n_col]).split('[')[0].strip()
+            if not ticker or ticker == 'NAN': continue
+            
+            if "S&P" in market_type:
+                ticker = ticker.replace('.', '-')
+            elif any(m in market_type for m in ["DAX", "MDAX", "SDAX"]):
+                if not ticker.endswith('.DE'): ticker += '.DE'
+            elif "FTSE" in market_type:
+                ticker = ticker.replace('.', '-') + ".L"
+            elif "CAC" in market_type:
+                if not ticker.endswith('.PA'): ticker += '.PA'
+            elif "NIKKEI" in market_type:
+                if not ticker.endswith('.T'): ticker += '.T'
+            elif "EURO STOXX" in market_type:
+                if '.' not in ticker:
+                    suffix = ".DE"
+                    c_listing = [c for c in df.columns if 'listing' in str(c).lower() or 'exchange' in str(c).lower()]
+                    if c_listing:
+                        listing = str(row[c_listing[0]]).lower()
+                        if 'paris' in listing: suffix = ".PA"
+                        elif 'amsterdam' in listing: suffix = ".AS"
+                        elif 'milan' in listing or 'milano' in listing: suffix = ".MI"
+                        elif 'madrid' in listing: suffix = ".MC"
+                        elif 'brussels' in listing: suffix = ".BR"
+                    ticker += suffix
+            extracted.append({"ticker": ticker, "name": name})
+        return extracted
+
     try:
         if "S&P 500" in markt:
             req = urllib.request.Request("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", headers=headers)
-            with urllib.request.urlopen(req) as r:
-                df = pd.read_html(StringIO(r.read().decode('utf-8')))[0]
-            col = [c for c in df.columns if 'symbol' in str(c).lower() or 'ticker' in str(c).lower()][0]
-            return [str(t).replace('.', '-').strip().upper() for t in df[col].tolist()]
-            
+            with urllib.request.urlopen(req) as r: df = pd.read_html(StringIO(r.read().decode('utf-8')))[0]
+            return extract_from_df(df, "S&P")
         elif "S&P 400" in markt:
             req = urllib.request.Request("https://en.wikipedia.org/wiki/List_of_S%26P_400_companies", headers=headers)
-            with urllib.request.urlopen(req) as r:
-                df = pd.read_html(StringIO(r.read().decode('utf-8')))[0]
-            col = [c for c in df.columns if 'symbol' in str(c).lower() or 'ticker' in str(c).lower()][0]
-            return [str(t).replace('.', '-').strip().upper() for t in df[col].tolist()]
-            
+            with urllib.request.urlopen(req) as r: df = pd.read_html(StringIO(r.read().decode('utf-8')))[0]
+            return extract_from_df(df, "S&P")
         elif "S&P 600" in markt:
             req = urllib.request.Request("https://en.wikipedia.org/wiki/List_of_S%26P_600_companies", headers=headers)
-            with urllib.request.urlopen(req) as r:
-                df = pd.read_html(StringIO(r.read().decode('utf-8')))[1]
-            col = [c for c in df.columns if 'symbol' in str(c).lower() or 'ticker' in str(c).lower()][0]
-            return [str(t).replace('.', '-').strip().upper() for t in df[col].tolist()]
-            
+            with urllib.request.urlopen(req) as r: df = pd.read_html(StringIO(r.read().decode('utf-8')))[1]
+            return extract_from_df(df, "S&P")
         elif "DAX 40" in markt:
             req = urllib.request.Request("https://de.wikipedia.org/wiki/DAX", headers=headers)
-            with urllib.request.urlopen(req) as r:
-                tables = pd.read_html(StringIO(r.read().decode('utf-8')))
+            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
             for df in tables:
-                cols_clean = [str(c).lower() for c in df.columns]
-                if 'symbol' in cols_clean or 'kürzel' in cols_clean:
-                    c_name = df.columns[[idx for idx, c in enumerate(cols_clean) if c in ['symbol', 'kürzel']][0]]
-                    return [str(t).strip().upper() + ".DE" if not str(t).endswith('.DE') else str(t).strip().upper() for t in df[c_name].dropna().tolist()]
-            
+                res = extract_from_df(df, "DAX")
+                if len(res) >= 30: return res
         elif "MDAX" in markt:
             req = urllib.request.Request("https://de.wikipedia.org/wiki/MDAX", headers=headers)
-            with urllib.request.urlopen(req) as r:
-                tables = pd.read_html(StringIO(r.read().decode('utf-8')))
+            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
             for df in tables:
-                cols_clean = [str(c).lower() for c in df.columns]
-                if 'symbol' in cols_clean or 'kürzel' in cols_clean:
-                    c_name = df.columns[[idx for idx, c in enumerate(cols_clean) if c in ['symbol', 'kürzel']][0]]
-                    return [str(t).strip().upper() + ".DE" if not str(t).endswith('.DE') else str(t).strip().upper() for t in df[c_name].dropna().tolist()]
-            
+                res = extract_from_df(df, "MDAX")
+                if len(res) >= 30: return res
         elif "SDAX" in markt:
             req = urllib.request.Request("https://de.wikipedia.org/wiki/SDAX", headers=headers)
-            with urllib.request.urlopen(req) as r:
-                tables = pd.read_html(StringIO(r.read().decode('utf-8')))
+            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
             for df in tables:
-                cols_clean = [str(c).lower() for c in df.columns]
-                if 'symbol' in cols_clean or 'kürzel' in cols_clean:
-                    c_name = df.columns[[idx for idx, c in enumerate(cols_clean) if c in ['symbol', 'kürzel']][0]]
-                    return [str(t).strip().upper() + ".DE" if not str(t).endswith('.DE') else str(t).strip().upper() for t in df[c_name].dropna().tolist()]
-
+                res = extract_from_df(df, "SDAX")
+                if len(res) >= 30: return res
         elif "EURO STOXX" in markt:
             req = urllib.request.Request("https://en.wikipedia.org/wiki/Euro_Stoxx_50", headers=headers)
-            with urllib.request.urlopen(req) as r:
-                tables = pd.read_html(StringIO(r.read().decode('utf-8')))
+            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
             for df in tables:
-                c_ticker = [c for c in df.columns if 'ticker' in str(c).lower() or 'symbol' in str(c).lower()]
-                c_listing = [c for c in df.columns if 'listing' in str(c).lower() or 'exchange' in str(c).lower() or 'börse' in str(c).lower()]
-                if c_ticker:
-                    tickers = []
-                    for _, row in df.iterrows():
-                        t = str(row[c_ticker[0]]).split('[')[0].strip().upper()
-                        if not t or t == 'NAN': continue
-                        if '.' in t:
-                            tickers.append(t)
-                        else:
-                            suffix = ".DE"
-                            if c_listing:
-                                listing = str(row[c_listing[0]]).lower()
-                                if 'paris' in listing: suffix = ".PA"
-                                elif 'amsterdam' in listing: suffix = ".AS"
-                                elif 'milan' in listing or 'milano' in listing: suffix = ".MI"
-                                elif 'madrid' in listing: suffix = ".MC"
-                                elif 'brussels' in listing or 'brüssel' in listing: suffix = ".BR"
-                                elif 'helsinki' in listing: suffix = ".HE"
-                                elif 'dublin' in listing: suffix = ".IE"
-                            tickers.append(t + suffix)
-                    if len(tickers) >= 30:
-                        return tickers
-                        
+                res = extract_from_df(df, "EURO STOXX")
+                if len(res) >= 30: return res
         elif "FTSE 100" in markt:
             req = urllib.request.Request("https://en.wikipedia.org/wiki/FTSE_100_Index", headers=headers)
-            with urllib.request.urlopen(req) as r:
-                tables = pd.read_html(StringIO(r.read().decode('utf-8')))
+            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
             for df in tables:
-                cols_clean = [str(c).lower() for c in df.columns]
-                if 'EPIC' in df.columns or 'ticker' in cols_clean:
-                    c_name = 'EPIC' if 'EPIC' in df.columns else df.columns[[idx for idx, c in enumerate(cols_clean) if 'ticker' in c][0]]
-                    return [str(t).replace('.', '-').strip().upper() + ".L" for t in df[c_name].dropna().tolist()]
-            
+                res = extract_from_df(df, "FTSE 100")
+                if len(res) >= 50: return res
         elif "CAC 40" in markt:
             req = urllib.request.Request("https://en.wikipedia.org/wiki/CAC_40", headers=headers)
-            with urllib.request.urlopen(req) as r:
-                tables = pd.read_html(StringIO(r.read().decode('utf-8')))
+            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
             for df in tables:
-                cols_clean = [str(c).lower() for c in df.columns]
-                if 'ticker' in cols_clean:
-                    c_name = df.columns[[idx for idx, c in enumerate(cols_clean) if 'ticker' in c][0]]
-                    return [str(t).strip().upper() + ".PA" if not str(t).endswith('.PA') else str(t).strip().upper() for t in df[c_name].dropna().tolist()]
-            
+                res = extract_from_df(df, "CAC 40")
+                if len(res) >= 30: return res
         elif "Nikkei 225" in markt:
             req = urllib.request.Request("https://en.wikipedia.org/wiki/Nikkei_225", headers=headers)
-            with urllib.request.urlopen(req) as r:
-                tables = pd.read_html(StringIO(r.read().decode('utf-8')))
+            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
             for df in tables:
-                cols_clean = [str(c).lower() for c in df.columns]
-                if 'ticker' in cols_clean:
-                    c_name = df.columns[[idx for idx, c in enumerate(cols_clean) if 'ticker' in c][0]]
-                    return [str(t).strip().upper() + ".T" if not str(t).endswith('.T') else str(t).strip().upper() for t in df[c_name].dropna().tolist()]
-
+                res = extract_from_df(df, "NIKKEI")
+                if len(res) >= 50: return res
     except Exception as e:
         st.error(f"Fehler beim Live-Scraping von {markt}: {e}")
     
-    # Hardcoded Fallback für DAX falls Wikipedia komplett offline ist
     if "DAX 40" in markt:
-        return ["ADS.DE", "ALV.DE", "BAS.DE", "BAYN.DE", "BMW.DE", "CBK.DE", "DBK.DE", "DB1.DE", "DHL.DE", "DTE.DE", "EOAN.DE", "INF.DE", "MBG.DE", "MUV2.DE", "RWE.DE", "SAP.DE", "SIE.DE", "VOW3.DE", "VNA.DE"]
+        return [{"ticker": "ADS.DE", "name": "Adidas"}, {"ticker": "ALV.DE", "name": "Allianz"}, {"ticker": "BAS.DE", "name": "BASF"}, {"ticker": "BAYN.DE", "name": "Bayer"}, {"ticker": "BMW.DE", "name": "BMW"}, {"ticker": "DBK.DE", "name": "Deutsche Bank"}, {"ticker": "DTE.DE", "name": "Deutsche Telekom"}, {"ticker": "SAP.DE", "name": "SAP"}, {"ticker": "SIE.DE", "name": "Siemens"}]
     return []
 
 if "scan_results" not in st.session_state:
@@ -203,22 +188,19 @@ st.sidebar.header("📈 Chart-Signale")
 golden_cross_active = st.sidebar.toggle("Nur mit Golden Cross (letzte 14 Tage)", value=False)
 
 # ==============================================================================
-# 3. POP-UP (DETAILS, METRIKEN & 3-STUFEN TIMEFRAME CHARTS)
+# 3. POP-UP (AKTIENNAME PERFEKT GESICHERT)
 # ==============================================================================
 @st.dialog("📊 Aktien-Details & Signal", width="large")
-def show_details_popup(ticker):
+def show_details_popup(ticker, company_name):
     with st.spinner("Lade optimierte Daten aus dem Cache..."):
         try:
             df_base = load_cached_history(ticker, "1y", "1d")
-            
             if df_base.empty:
-                st.error("Keine Daten von Yahoo Finance erhalten. Bitte versuche es in einer Minute erneut.")
+                st.error("Keine Daten von Yahoo Finance erhalten. Bitte versuche es gleich noch einmal.")
                 return
             
             current_price = df_base['Close'].iloc[-1]
-            meta = load_cached_meta(ticker)
-            isin = meta["isin"]
-            company_name = meta["name"]
+            isin = load_cached_isin(ticker)
             
             df_base['RSI'] = calculate_rsi(df_base['Close'], period=14)
             df_base['SMA50'] = df_base['Close'].rolling(window=50).mean()
@@ -232,6 +214,7 @@ def show_details_popup(ticker):
             rsi_aktuell = df_base['RSI'].iloc[-1]
             macd_pct_aktuell = df_base['MACD_Pct'].iloc[-1]
             
+            # Der Name wird garantiert angezeigt, da er als Argument übergeben wurde!
             st.write(f"## {company_name} (`{ticker}`)")
             
             meta_col1, meta_col2, meta_col3, meta_col4 = st.columns(4)
@@ -242,7 +225,7 @@ def show_details_popup(ticker):
             with meta_col3:
                 st.metric("MACD vs. Null-Linie", f"{macd_pct_aktuell:+.2f}%")
             with meta_col4:
-                st.write(f"**Identifikation:** WKN/ISIN: `{isin}`")
+                st.write(f"**Identifikation:** ISIN: `{isin}`")
                 tv_ticker = ticker.split('.')[0]
                 tradingview_url = f"https://de.tradingview.com/symbols/{tv_ticker}/"
                 st.markdown(f"[➡️ **Auf TradingView**]({tradingview_url})")
@@ -331,19 +314,21 @@ st.title("⚡ Ultra-Schneller Globaler RSI-Scanner")
 markt = st.selectbox("1. Welchen Markt / Index möchtest du scannen?", ("USA (S&P 500 Large Caps)", "USA (S&P 400 Mid Caps)", "USA (S&P 600 Small Caps)", "Deutschland (DAX 40 Large Caps)", "Deutschland (MDAX Mid Caps)", "Deutschland (SDAX Small Caps)", "Eurozone (EURO STOXX 50)", "Großbritannien (FTSE 100)", "Frankreich (CAC 40)", "Japan (Nikkei 225)"))
 
 # ==============================================================================
-# 5. HIGH-SPEED SCAN LOGIK
+# 5. HIGH-SPEED SCAN LOGIK WITH REINFORCED NAMES
 # ==============================================================================
 if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
     st.session_state.scan_results = []
     st.session_state.has_scanned = True
     
-    with st.spinner(f"Hole aktuelle Ticker-Liste für {markt}..."):
-        tickers = fetch_market_tickers(markt)
+    with st.spinner(f"Hole Ticker- und Namensdaten für {markt}..."):
+        market_data = fetch_market_data(markt)
 
-    if tickers:
-        # Falls die Ticker-Menge zu groß wird, begrenzen wir sie zum Schutz vor Rate-Limits auf 60 zufällige Werte
-        if len(tickers) > 60:
-            tickers = random.sample(tickers, 60)
+    if market_data:
+        if len(market_data) > 60:
+            market_data = random.sample(market_data, 60)
+
+        tickers = [item['ticker'] for item in market_data]
+        ticker_to_name = {item['ticker']: item['name'] for item in market_data}
 
         with st.spinner(f"Scanne {len(tickers)} Aktien parallel aus {markt}..."):
             try:
@@ -378,8 +363,10 @@ if st.button("🚀 High-Speed Scan Starten", use_container_width=True):
                         if not df['Crossover'].tail(14).any():
                             continue
                     
+                    # Hier speichern wir Ticker und den korrekten Namen ab
                     st.session_state.scan_results.append({
                         "ticker": ticker,
+                        "name": ticker_to_name.get(ticker, ticker),
                         "rsi": f"{rsi_aktuell:.2f}"
                     })
             except Exception as e:
@@ -397,9 +384,11 @@ if st.session_state.has_scanned:
             col_target = cols[idx % 3]
             with col_target:
                 with st.container(border=True):
-                    st.write(f"**{item['ticker']}**")
-                    st.write(f"Aktueller RSI: `{item['rsi']}`")
+                    # Anzeige des echten Namens bereits auf der Übersicht
+                    st.write(f"**{item['name']}**")
+                    st.caption(f"Ticker: `{item['ticker']}` | RSI: `{item['rsi']}`")
+                    # Der Name wird direkt in die Dialog-Funktion durchgereicht
                     if st.button("📊 Analysieren", key=f"btn_{item['ticker']}_{idx}"):
-                        show_details_popup(item["ticker"])
+                        show_details_popup(item["ticker"], item["name"])
     else:
         st.warning("Keine Aktien mit den gewählten Kriterien gefunden. Passe deine RSI-Filter an oder starte den Scan erneut.")
