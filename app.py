@@ -153,4 +153,52 @@ def fetch_market_data(markt):
                 res = extract_from_df(df, "SDAX")
                 if len(res) >= 30: return res
         elif "EURO STOXX" in markt:
-            req = urllib.request.Request("https://en.
+            req = urllib.request.Request("https://en.wikipedia.org/wiki/Euro_Stoxx_50", headers=headers)
+            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
+            for df in tables:
+                res = extract_from_df(df, "EURO STOXX")
+                if len(res) >= 30: return res
+        elif "FTSE 100" in markt:
+            req = urllib.request.Request("https://en.wikipedia.org/wiki/FTSE_100_Index", headers=headers)
+            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
+            for df in tables:
+                res = extract_from_df(df, "FTSE 100")
+                if len(res) >= 50: return res
+        elif "CAC 40" in markt:
+            req = urllib.request.Request("https://en.wikipedia.org/wiki/CAC_40", headers=headers)
+            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
+            for df in tables:
+                res = extract_from_df(df, "CAC 40")
+                if len(res) >= 30: return res
+        elif "Nikkei 225" in markt:
+            req = urllib.request.Request("https://en.wikipedia.org/wiki/Nikkei_225", headers=headers)
+            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
+            for df in tables:
+                res = extract_from_df(df, "NIKKEI")
+                if len(res) >= 50: return res
+    except Exception:
+        st.sidebar.warning("Live-Scraping blockiert, nutze integriertes Backup.")
+    
+    if "USA" in markt:
+        return [{"ticker": "AAPL", "name": "Apple"}, {"ticker": "MSFT", "name": "Microsoft"}, {"ticker": "NVDA", "name": "NVIDIA"}, {"ticker": "AMZN", "name": "Amazon"}, {"ticker": "GOOGL", "name": "Alphabet"}, {"ticker": "META", "name": "Meta"}, {"ticker": "TSLA", "name": "Tesla"}]
+    else:
+        return [{"ticker": "SAP.DE", "name": "SAP"}, {"ticker": "SIE.DE", "name": "Siemens"}, {"ticker": "ALV.DE", "name": "Allianz"}, {"ticker": "DTE.DE", "name": "Deutsche Telekom"}, {"ticker": "BMW.DE", "name": "BMW"}, {"ticker": "BAS.DE", "name": "BASF"}, {"ticker": "BAYN.DE", "name": "Bayer"}]
+
+# ==============================================================================
+# 4. CHART RENDERING ENGINE
+# ==============================================================================
+def render_chart(df_chart, title_suffix):
+    if df_chart.empty or len(df_chart) < 2:
+        st.warning(f"Keine ausreichenden Intraday-Daten für {title_suffix} im Cache.")
+        return
+    
+    df_chart['RSI'] = calculate_rsi(df_chart['Close'], period=14)
+    df_chart['MACD'], df_chart['MACD_Signal'], df_chart['MACD_Hist'], _ = calculate_macd(df_chart['Close'])
+    df_chart['BB_Upper'], df_chart['BB_Middle'], df_chart['BB_Lower'] = calculate_bollinger_bands(df_chart['Close'])
+    
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.06, row_heights=[0.45, 0.25, 0.30])
+    
+    fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['Close'], mode='lines', name='Kurs', line=dict(color='#1f77b4', width=2.5)), row=1, col=1)
+    if 'SMA50' in df_chart.columns:
+        fig.add_trace(gr.Scatter(x=df_chart.index, y=df_chart['SMA50'], mode='lines', name='SMA 50', line=dict(color='orange', width=1.5)), row=1, col=1)
+        fig.add
