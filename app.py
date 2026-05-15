@@ -14,7 +14,7 @@ import json
 # ==============================================================================
 st.set_page_config(layout="wide", page_title="High-Speed RSI Scanner", page_icon="⚡")
 
-# Custom CSS für modernes Fintech-UI-Design injected
+# Custom CSS für modernes Fintech-UI-Design
 st.markdown("""
     <style>
         /* Hauptüberschrift Styling */
@@ -48,7 +48,7 @@ st.markdown("""
         }
         .rsi-low { background-color: rgba(34, 197, 94, 0.2); color: #22c55e; }
         .rsi-mid { background-color: rgba(148, 163, 184, 0.2); color: #94a3b8; }
-        .rsi-high { background-color: rgba(239, 68, 68, 0.2); color: #ef6868; }
+        .rsi-high { background-color: rgba(239, 68, 68, 0.2); color: #ef4444; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -102,7 +102,7 @@ def calculate_bollinger_bands(series, period=20, num_std=2):
     return upper_band, sma, lower_band
 
 # ==============================================================================
-# 3. TICKER SCRAPER
+# 3. TICKER SCRAPER (BEREINIGT)
 # ==============================================================================
 def fetch_market_data(markt):
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -116,64 +116,4 @@ def fetch_market_data(markt):
                 break
         n_idx = -1
         for idx, c in enumerate(cols_lower):
-            if any(k in c for k in ['security', 'unternehmen', 'company', 'name', 'firma']) and idx != t_idx:
-                n_idx = idx
-                break
-        if t_idx == -1: return []
-        if n_idx == -1: n_idx = 0
-        
-        t_col = df.columns[t_idx]
-        n_col = df.columns[n_idx]
-        
-        extracted = []
-        for _, row in df.iterrows():
-            ticker = str(row[t_col]).split('[')[0].strip().upper()
-            name = str(row[n_col]).split('[')[0].strip()
-            if not ticker or ticker == 'NAN': continue
-            
-            if "S&P" in market_type:
-                ticker = ticker.replace('.', '-')
-            elif any(m in market_type for m in ["DAX", "MDAX", "SDAX"]):
-                if not ticker.endswith('.DE'): ticker += '.DE'
-            elif "FTSE" in market_type:
-                ticker = ticker.replace('.', '-') + ".L"
-            elif "CAC" in market_type:
-                if not ticker.endswith('.PA'): ticker += '.PA'
-            elif "NIKKEI" in market_type:
-                if not ticker.endswith('.T'): ticker += '.T'
-            elif "EURO STOXX" in market_type:
-                if '.' not in ticker:
-                    suffix = ".DE"
-                    c_listing = [c for c in df.columns if 'listing' in str(c).lower() or 'exchange' in str(c).lower()]
-                    if c_listing:
-                        listing = str(row[c_listing[0]]).lower()
-                        if 'paris' in listing: suffix = ".PA"
-                        elif 'amsterdam' in listing: suffix = ".AS"
-                        elif 'milan' in listing or 'milano' in listing: suffix = ".MI"
-                        elif 'madrid' in listing: suffix = ".MC"
-                        elif 'brussels' in listing: suffix = ".BR"
-                    ticker += suffix
-            extracted.append({"ticker": ticker, "name": name})
-        return extracted
-
-    try:
-        if "S&P 500" in markt:
-            req = urllib.request.Request("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", headers=headers)
-            with urllib.request.urlopen(req) as r: df = pd.read_html(StringIO(r.read().decode('utf-8')))[0]
-            return extract_from_df(df, "S&P")
-        elif "S&P 400" in markt:
-            req = urllib.request.Request("https://en.wikipedia.org/wiki/List_of_S%26P_400_companies", headers=headers)
-            with urllib.request.urlopen(req) as r: df = pd.read_html(StringIO(r.read().decode('utf-8')))[0]
-            return extract_from_df(df, "S&P")
-        elif "S&P 600" in markt:
-            req = urllib.request.Request("https://en.wikipedia.org/wiki/List_of_S%26P_600_companies", headers=headers)
-            with urllib.request.urlopen(req) as r: df = pd.read_html(StringIO(r.read().decode('utf-8')))[1]
-            return extract_from_df(df, "S&P")
-        elif "DAX 40" in markt:
-            req = urllib.request.Request("https://de.wikipedia.org/wiki/DAX", headers=headers)
-            with urllib.request.urlopen(req) as r: tables = pd.read_html(StringIO(r.read().decode('utf-8')))
-            for df in tables:
-                res = extract_from_df(df, "DAX")
-                if len(res) >= 30: return res
-        elif "MDAX" in markt:
-            req = urllib.request.Request("
+            if any(
