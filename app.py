@@ -175,9 +175,9 @@ if st.button("🚀 Scan Starten"):
                     avg_vol = df['Volume'].tail(15).mean()
                     
                     # Deine Strategie-Bedingungen
-                    rsi_ok = 55 <= last['RSI'] <= 65
+                    rsi_ok = 45 <= last['RSI'] <= 66
                     macd_ok = last['MACD'] > last['MACD_Signal']
-                    vol_ok = last['Volume'] > (avg_vol * 1.3)
+                    vol_ok = last['Volume'] > (avg_vol * 0.8) 
                     
                     if rsi_ok and macd_ok and vol_ok:
                         found_counter += 1
